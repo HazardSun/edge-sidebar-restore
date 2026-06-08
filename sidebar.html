@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>侧边栏</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div id="app">
+    <div id="header">
+      <span id="app-title">侧边栏工具</span>
+      <div id="header-actions">
+        <button id="collapse-btn" title="折叠侧边栏">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" fill="currentColor"/></svg>
+          <span>折叠</span>
+        </button>
+        <button id="close-btn" title="关闭侧边栏">&times;</button>
+      </div>
+    </div>
+
+    <div id="main-area">
+      <div id="content">
+        <div id="tab-search" class="tab-content active">
+          <div class="search-box">
+            <input type="text" id="search-input" placeholder="搜索..." autocomplete="off">
+            <button id="search-btn" class="btn-primary">搜索</button>
+          </div>
+          <div class="engine-options">
+            <label><input type="radio" name="engine" value="bing" checked> Bing</label>
+            <label><input type="radio" name="engine" value="google"> Google</label>
+          </div>
+          <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>常用网站</span>
+            <button id="sq-add-btn" class="btn-sm">+ 添加</button>
+          </div>
+          <div id="search-quick-links" class="link-grid"></div>
+          <div id="sq-form" style="display:none;flex-direction:column;gap:4px;padding:8px;background:var(--surface);border-radius:6px;border:1px solid var(--border);margin-top:6px">
+            <input type="text" id="sq-name" placeholder="名称" style="padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:var(--bg);color:var(--text);outline:none">
+            <input type="url" id="sq-url" placeholder="网址" style="padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:var(--bg);color:var(--text);outline:none">
+            <div style="display:flex;gap:4px">
+              <button id="sq-save-btn" class="btn-sm">保存</button>
+              <button id="sq-cancel-btn" class="btn-sm btn-secondary">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-tools" class="tab-content">
+          <div class="section-title">计算器</div>
+          <div id="calculator">
+            <div id="calc-display">0</div>
+            <div id="calc-buttons">
+              <button class="c-btn c-clear">C</button>
+              <button class="c-btn c-op">&#xB1;</button>
+              <button class="c-btn c-op">%</button>
+              <button class="c-btn c-op">&#xF7;</button>
+              <button class="c-btn c-num">7</button>
+              <button class="c-btn c-num">8</button>
+              <button class="c-btn c-num">9</button>
+              <button class="c-btn c-op">&#xD7;</button>
+              <button class="c-btn c-num">4</button>
+              <button class="c-btn c-num">5</button>
+              <button class="c-btn c-num">6</button>
+              <button class="c-btn c-op">-</button>
+              <button class="c-btn c-num">1</button>
+              <button class="c-btn c-num">2</button>
+              <button class="c-btn c-num">3</button>
+              <button class="c-btn c-op">+</button>
+              <button class="c-btn c-num zero" style="grid-column:span 2">0</button>
+              <button class="c-btn c-num">.</button>
+              <button class="c-btn c-eq">=</button>
+            </div>
+          </div>
+
+          <div class="section-title">单位换算</div>
+          <div id="converter">
+            <select id="conv-type">
+              <option value="length">长度</option>
+              <option value="weight">重量</option>
+              <option value="temperature">温度</option>
+              <option value="area">面积</option>
+              <option value="volume">体积</option>
+              <option value="speed">速度</option>
+            </select>
+            <div class="conv-row">
+              <input type="number" id="conv-input" placeholder="输入值">
+              <select id="conv-from"></select>
+            </div>
+            <div class="conv-row">
+              <input type="number" id="conv-output" placeholder="结果" readonly>
+              <select id="conv-to"></select>
+            </div>
+          </div>
+
+        </div>
+
+        <div id="tab-exchange" class="tab-content">
+          <div class="section-title">实时汇率转换</div>
+          <div id="exchange-rate">
+            <div class="ex-card">
+              <div class="ex-label">金额</div>
+              <div class="ex-input-row">
+                <input type="number" id="ex-amount" value="1">
+                <select id="ex-from"></select>
+              </div>
+            </div>
+            <div class="ex-swap-row">
+              <button id="ex-swap" title="互换币种">&#x21c5;</button>
+              <div id="ex-rate-display">—</div>
+              <button id="ex-refresh" title="刷新汇率">&#x21bb;</button>
+            </div>
+            <div class="ex-card">
+              <div class="ex-label">换算结果</div>
+              <div class="ex-input-row">
+                <input type="number" id="ex-result" readonly>
+                <select id="ex-to"></select>
+              </div>
+            </div>
+            <div class="ex-popular-section">
+              <div class="ex-pop-header">主要汇率</div>
+              <div id="ex-popular-rates"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-links" class="tab-content">
+          <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span>快速链接</span>
+            <button id="add-link-btn" class="btn-sm">+ 添加</button>
+          </div>
+          <div id="links-grid" class="link-grid"></div>
+          <div id="add-link-form" class="hidden">
+            <input type="text" id="link-name" placeholder="名称">
+            <input type="url" id="link-url" placeholder="URL (https://...)">
+            <div style="display:flex;gap:4px">
+              <button id="save-link-btn" class="btn-sm">保存</button>
+              <button id="cancel-link-btn" class="btn-sm btn-secondary">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-notes" class="tab-content">
+          <div class="section-title">笔记 <span id="notes-status" style="float:right;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+          <textarea id="notes-textarea" placeholder="写点什么...&#10;&#10;(内容会自动保存)"></textarea>
+        </div>
+
+        <div id="tab-clock" class="tab-content">
+          <div id="clock-time">00:00:00</div>
+          <div id="clock-date">0000年00月00日 周X</div>
+          <div id="greeting-text">你好！</div>
+          <div class="section-title" style="margin-top:16px">今日备忘</div>
+          <textarea id="daily-note" placeholder="今天要做的事..." rows="3"></textarea>
+        </div>
+      </div>
+
+      <div id="browser-view" class="hidden">
+        <div id="browser-toolbar">
+          <button id="br-back" class="br-btn" disabled title="后退">
+            <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+          </button>
+          <button id="br-fwd" class="br-btn" disabled title="前进">
+            <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+          </button>
+          <button id="br-refresh" class="br-btn" title="刷新">
+            <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+          </button>
+          <button id="browser-open-tab" class="br-btn" title="在标签页中打开">
+            <svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+          </button>
+          <div id="br-url" title="当前网址">about:blank</div>
+          <button id="br-close" class="br-btn" title="关闭浏览器视图">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <iframe id="browser-iframe" src="about:blank"></iframe>
+      </div>
+    </div>
+
+    <div id="tab-bar">
+      <button class="tab-btn active" data-tab="search">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <span>搜索</span>
+      </button>
+      <button class="tab-btn" data-tab="tools">
+        <svg viewBox="0 0 24 24"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+        <span>工具</span>
+      </button>
+      <button class="tab-btn" data-tab="exchange">
+        <svg viewBox="0 0 24 24"><path d="M12.89 11.1c-1.78-.59-2.64-.96-2.64-1.9 0-1.02 1.11-1.39 1.81-1.39 1.31 0 1.79.56 2 1.02l2.24-.93c-.58-1.39-1.75-2.38-3.63-2.63V4h-2v2.17c-2.5.48-3.83 2.07-3.83 3.83 0 2.22 1.7 3.08 3.83 3.83 1.79.63 2.64 1.07 2.64 1.98 0 1.02-.87 1.66-2.04 1.66-1.5 0-2.25-.66-2.6-1.31l-2.33.96c.66 1.55 1.9 2.68 3.93 2.93V20h2v-2.17c2.65-.5 4.04-2.22 4.04-4.32 0-2.2-1.46-3.18-3.41-4.01z"/></svg>
+        <span>汇率</span>
+      </button>
+      <button class="tab-btn" data-tab="links">
+        <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
+        <span>链接</span>
+      </button>
+      <button class="tab-btn" data-tab="notes">
+        <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+        <span>笔记</span>
+      </button>
+      <button class="tab-btn" data-tab="clock">
+        <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+        <span>时钟</span>
+      </button>
+    </div>
+  </div>
+  <script src="sidebar.js"></script>
+</body>
+</html>
