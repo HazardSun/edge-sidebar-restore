@@ -239,7 +239,7 @@ const Converter = {
 const ExchangeRate = {
   currencies: { USD:'美元', EUR:'欧元', CNY:'人民币', JPY:'日元', GBP:'英镑', KRW:'韩元', HKD:'港币', TWD:'新台币', SGD:'新加坡元', AUD:'澳元', CAD:'加元', CHF:'瑞士法郎', THB:'泰铢', MXN:'墨西哥比索', INR:'印度卢比', BRL:'巴西雷亚尔', RUB:'卢布', NZD:'新西兰元', SEK:'瑞典克朗', NOK:'挪威克朗', DKK:'丹麦克朗', ZAR:'南非兰特', TRY:'土耳其里拉', PLN:'波兰兹罗提', PHP:'菲律宾比索', MYR:'马来西亚林吉特', IDR:'印尼盾', VND:'越南盾' },
   popular: ['USD','EUR','JPY','GBP','KRW','HKD','TWD','SGD','AUD','CAD','CHF','THB'],
-  rates: null,
+  rates: null, timer: null,
   init() {
     this.from = document.getElementById('ex-from');
     this.to = document.getElementById('ex-to');
@@ -254,6 +254,8 @@ const ExchangeRate = {
     this.to.addEventListener('change', () => this.convert());
     document.getElementById('ex-refresh').addEventListener('click', () => this.fetchRates());
     document.getElementById('ex-swap').addEventListener('click', () => this.swap());
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => this.fetchRates(), 300000);
   },
   populateCurrencies() {
     const keys = Object.keys(this.currencies);
@@ -269,6 +271,7 @@ const ExchangeRate = {
     fetch(url).then(r => r.json()).then(data => {
       if (data.result === 'success') {
         this.rates = data.rates;
+        this.lastFetch = Date.now();
         this.convert();
         this.showPopular();
       } else {
@@ -288,7 +291,8 @@ const ExchangeRate = {
     else rate = this.rates[t];
     if (rate == null) { this.result.value = 'N/A'; this.rateDisplay.textContent = '—'; return; }
     this.result.value = (amount * rate).toFixed(4);
-    this.rateDisplay.textContent = `1 ${f} = ${Number(rate).toFixed(4)} ${t}`;
+    const now = this.lastFetch ? new Date(this.lastFetch).toLocaleTimeString() : '';
+    this.rateDisplay.textContent = `1 ${f} = ${Number(rate).toFixed(4)} ${t}` + (now ? ` (${now})` : '');
   },
   showPopular() {
     if (!this.rates) return;
