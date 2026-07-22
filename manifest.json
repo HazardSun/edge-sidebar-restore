@@ -5,8 +5,28 @@
   "description": "恢复 Edge 被取消的侧边栏功能 — 原生侧面板零遮挡、页面快捷入口、搜索、计算器、单位换算、汇率、快速链接、笔记",
   "permissions": [
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "declarativeNetRequestWithHostAccess"
   ],
+  "host_permissions": [
+    "*://*.google.com/*",
+    "*://*.youtube.com/*",
+    "*://*.gmail.com/*",
+    "*://*.googlevideo.com/*",
+    "*://*.ytimg.com/*",
+    "*://*.ggpht.com/*",
+    "*://*.googleusercontent.com/*",
+    "*://*.gstatic.com/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_frame",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

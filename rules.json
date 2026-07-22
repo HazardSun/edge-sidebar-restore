@@ -1,0 +1,28 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        { "header": "x-frame-options", "operation": "remove" },
+        { "header": "content-security-policy", "operation": "remove" },
+        { "header": "content-security-policy-report-only", "operation": "remove" },
+        { "header": "frame-options", "operation": "remove" }
+      ]
+    },
+    "condition": {
+      "requestDomains": [
+        "google.com",
+        "youtube.com",
+        "gmail.com",
+        "googlevideo.com",
+        "ytimg.com",
+        "ggpht.com",
+        "googleusercontent.com",
+        "gstatic.com"
+      ],
+      "resourceTypes": ["sub_frame"]
+    }
+  }
+]
