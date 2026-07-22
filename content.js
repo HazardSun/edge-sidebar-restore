@@ -51,20 +51,38 @@
       : { bg: '#f5f5f5', border: '#e0e0e0', icon: '#0078d4', iconHoverBg: 'rgba(0,0,0,0.04)' };
   }
 
-  /* ---------- 页面让位（margin） ---------- */
-  function setMargin(w, animate) {
+  /* ---------- 页面让位 ---------- */
+  // 展开态：body margin-right 让出对应宽度（px 级精确，不影响字号）
+  // 折叠态：html zoom 微缩 (~98%)——fixed 定位和 100vw 布局也会同步让位，
+  //         是内容脚本无法调整视口大小时唯一不遮挡任何元素的方式
+  function styleEl() {
     let s = document.getElementById(SIDEBAR_ID + '-s');
     if (!s) {
       s = document.createElement('style');
       s.id = SIDEBAR_ID + '-s';
       document.documentElement.appendChild(s);
     }
+    return s;
+  }
+
+  function setMargin(w, animate) {
     const t = animate === false ? '' : `transition:margin-right ${DURATION}ms ${EASE} !important;`;
-    s.textContent = `
+    styleEl().textContent = `
+      html { zoom:1 !important; }
       body { margin-right:${w}px !important; ${t} }
       @media print { #${SIDEBAR_ID} { display:none !important; } body { margin-right:0 !important; } }
     `;
   }
+
+  function setCollapsedZoom() {
+    const z = (window.innerWidth - RAIL_W) / window.innerWidth;
+    styleEl().textContent = `
+      body { margin-right:0 !important; transition:none !important; }
+      html { zoom:${z.toFixed(5)} !important; }
+      @media print { #${SIDEBAR_ID} { display:none !important; } html { zoom:1 !important; } }
+    `;
+  }
+
   function clearMargin() {
     const s = document.getElementById(SIDEBAR_ID + '-s');
     if (s) s.remove();
@@ -131,13 +149,16 @@
     host.appendChild(handle);
 
     document.documentElement.appendChild(host);
-    setMargin(RAIL_W, false);
+    setCollapsedZoom();
     darkMQ.addEventListener('change', applyTheme);
     window.addEventListener('resize', onResize);
     chrome.storage.onChanged.addListener(onStorageChange);
   }
 
-  function onResize() { renderRailLinks(); }
+  function onResize() {
+    renderRailLinks();
+    if (host && !expanded) setCollapsedZoom();
+  }
 
   function onStorageChange(changes, area) {
     if (area === 'local' && changes.quickLinks) renderRailLinks();
@@ -241,7 +262,13 @@
     if (!animate) setTransition(false);
     host.style.width = RAIL_W + 'px';
     host.style.boxShadow = 'none';
-    setMargin(RAIL_W, animate);
+    // 动画期间用 margin 平滑收拢，结束后切换为 zoom 模式确保零遮挡
+    if (animate) {
+      setMargin(RAIL_W, true);
+      setTimeout(() => { if (!expanded) setCollapsedZoom(); }, DURATION);
+    } else {
+      setCollapsedZoom();
+    }
 
     const done = () => {
       if (expanded || !host) return;
