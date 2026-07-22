@@ -94,14 +94,27 @@
           const b = document.createElement('button');
           b.type = 'button';
           b.title = '在侧边栏打开 ' + l.name;
-          b.textContent = (l.name[0] || '?').toUpperCase();
+          const letter = (l.name[0] || '?').toUpperCase();
+          b.textContent = letter;
           b.style.cssText = `
             width:24px; height:24px; flex-shrink:0; border:none; border-radius:6px;
-            background:#0078d4; color:#fff; font-size:12px; font-weight:600;
+            background:#fff; color:#0078d4; font-size:12px; font-weight:600;
             cursor:pointer; padding:0; line-height:24px; text-align:center;
+            display:flex; align-items:center; justify-content:center;
           `;
-          b.addEventListener('mouseenter', () => { b.style.background = '#106ebe'; });
-          b.addEventListener('mouseleave', () => { b.style.background = '#0078d4'; });
+          // 优先使用网站真实 favicon，失败时保留首字母
+          let host = '';
+          try { host = new URL(l.url).hostname; } catch (e) {}
+          if (host) {
+            const img = document.createElement('img');
+            img.alt = '';
+            img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=32';
+            img.style.cssText = 'width:16px; height:16px; display:block; border-radius:3px;';
+            img.addEventListener('load', () => { b.textContent = ''; b.appendChild(img); });
+            img.addEventListener('error', () => { /* 保留首字母兜底 */ });
+          }
+          b.addEventListener('mouseenter', () => { b.style.background = '#e8f0fa'; });
+          b.addEventListener('mouseleave', () => { b.style.background = '#fff'; });
           b.addEventListener('click', () => openPanel(l.url));
           iconsBox.appendChild(b);
         });

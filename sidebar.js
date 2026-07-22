@@ -78,10 +78,11 @@ const Search = {
       grid.innerHTML = this.links.map((l, i) => `
         <div class="link-item" data-url="${l.url}">
           <button class="del-btn" data-i="${i}">&times;</button>
-          <div class="link-letter">${(l.name[0]||'?').toUpperCase()}</div>
+          ${faviconHTML(l)}
           <span>${escHtml(l.name)}</span>
         </div>
       `).join('');
+      bindFaviconFallback(grid);
       grid.querySelectorAll('.link-item').forEach(el => {
         el.addEventListener('click', (e) => {
           if (e.target.closest('.del-btn')) return;
@@ -112,6 +113,36 @@ const Search = {
 };
 
 function escHtml(s) { return String(s).replace(/[&<>"]/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
+
+// 网站 favicon（Google favicon 服务），加载失败时回退为首字母方块
+function faviconHTML(l) {
+  const letter = (l.name[0] || '?').toUpperCase();
+  let host = '';
+  try { host = new URL(l.url).hostname; } catch (e) { return `<div class="link-letter">${letter}</div>`; }
+  if (!host) return `<div class="link-letter">${letter}</div>`;
+  return `<img class="link-favicon" data-letter="${letter}" alt="" loading="lazy"
+    src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64">`;
+}
+
+// 渲染后调用：为加载失败的 favicon 换上首字母方块
+function bindFaviconFallback(container) {
+  container.querySelectorAll('.link-favicon').forEach(img => {
+    img.addEventListener('error', () => {
+      const d = document.createElement('div');
+      d.className = 'link-letter';
+      d.textContent = img.dataset.letter || '?';
+      img.replaceWith(d);
+    });
+  });
+}
+
+// 从网址推导网站默认命名（去 www. 前缀）
+function siteName(url) {
+  try {
+    const h = new URL(url).hostname;
+    return h.replace(/^www\./, '') || url;
+  } catch (e) { return url; }
+}
 
 // 首次安装时的默认快捷链接（搜索页 / 链接页 / 页面快捷入口共用）
 const DEFAULT_QUICK_LINKS = [
@@ -418,10 +449,11 @@ const QuickLinks = {
     this.grid.innerHTML = this.links.map((l, i) => `
       <div class="link-item" data-url="${l.url}">
         <button class="del-btn" data-i="${i}">&times;</button>
-        <div class="link-letter">${(l.name[0]||'?').toUpperCase()}</div>
+        ${faviconHTML(l)}
         <span>${escHtml(l.name)}</span>
       </div>
     `).join('');
+    bindFaviconFallback(this.grid);
     this.grid.querySelectorAll('.link-item').forEach(el => {
       el.addEventListener('click', (e) => {
         if (e.target.closest('.del-btn')) return;
@@ -520,8 +552,17 @@ const Browser = {
       if (this.currentUrl) chrome.tabs.create({ url: this.currentUrl });
     });
 
-    this.iframe.addEventListener('load', () => { this.updateNav(); });
+    this.iframe.addEventListener('load', () => {
+      // 同源时可读取页面 <title>，升级顶栏显示（跨域时保持域名显示）
+      try {
+        const t = this.iframe.contentDocument && this.iframe.contentDocument.title;
+        if (t && this.currentUrl) this.setTitle(t);
+      } catch (e) {}
+      this.updateNav();
+    });
   },
+
+  setTitle(text) { document.getElementById('app-title').textContent = text; },
 
   isOpen() { return !this.view.classList.contains('hidden'); },
 
@@ -531,6 +572,7 @@ const Browser = {
     this.view.classList.remove('hidden');
     this.currentUrl = url;
     this.urlEl.textContent = url;
+    this.setTitle(siteName(url));
     this.iframe.src = url;
     this.history = this.history.slice(0, this.idx + 1);
     this.history.push(url);
@@ -544,6 +586,7 @@ const Browser = {
     this.view.classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     this.currentUrl = '';
+    this.setTitle('侧边栏工具');
   },
 
   goBack() {
@@ -552,6 +595,7 @@ const Browser = {
       this.iframe.src = this.history[this.idx];
       this.currentUrl = this.history[this.idx];
       this.urlEl.textContent = this.currentUrl;
+      this.setTitle(siteName(this.currentUrl));
       this.updateNav();
     }
   },
@@ -562,6 +606,7 @@ const Browser = {
       this.iframe.src = this.history[this.idx];
       this.currentUrl = this.history[this.idx];
       this.urlEl.textContent = this.currentUrl;
+      this.setTitle(siteName(this.currentUrl));
       this.updateNav();
     }
   },
