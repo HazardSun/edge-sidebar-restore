@@ -21,11 +21,27 @@
 
   let host = null;            // 唯一宿主容器
   let rail = null;            // 收起态窄栏
+  let railLinks = null;       // 窄栏中的常用网站图标区
+  let expandBtn = null;       // 窄栏顶部展开按钮
   let handle = null;          // 拖拽调宽条
   let iframe = null;          // 侧边栏 iframe（懒加载，常驻）
+  let iframeReady = false;    // iframe 是否加载完成
+  let pendingUrl = null;      // 等待 iframe 就绪后要打开的网址
   let expanded = false;
   let expandedW = DEFAULT_W;
   let ready = false;          // 初始化完成（避免存储回调前的重复创建）
+
+  // 与侧边栏 QuickLinks 默认列表保持一致
+  const DEFAULT_LINKS = [
+    { name:'Gmail', url:'https://mail.google.com' },
+    { name:'YouTube', url:'https://youtube.com' },
+    { name:'Google Drive', url:'https://drive.google.com' },
+    { name:'GitHub', url:'https://github.com' },
+    { name:'ChatGPT', url:'https://chat.openai.com' },
+    { name:'Wikipedia', url:'https://en.wikipedia.org' },
+    { name:'Reddit', url:'https://reddit.com' },
+    { name:'X', url:'https://x.com' },
+  ];
 
   /* ---------- 主题 ---------- */
   const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
@@ -72,21 +88,35 @@
       transition:width ${DURATION}ms ${EASE};
     `;
 
-    // 收起态窄栏（rail）：整条可点击，不遮挡页面（页面已让位）
-    rail = document.createElement('button');
-    rail.type = 'button';
-    rail.title = '展开侧边栏';
-    rail.setAttribute('aria-label', '展开侧边栏');
+    // 收起态窄栏（rail）：不遮挡页面（页面已让位），内含展开按钮 + 常用网站图标
+    rail = document.createElement('div');
     rail.style.cssText = `
       width:${RAIL_W}px; height:100%; flex-shrink:0;
-      border:none; padding:0; cursor:pointer;
-      background:${th.bg}; display:flex; align-items:center; justify-content:center;
+      background:${th.bg}; display:flex; flex-direction:column;
+      align-items:center; padding:8px 0; gap:4px; overflow:hidden;
+      box-sizing:border-box;
     `;
-    rail.innerHTML = railIcon(th.icon);
-    rail.addEventListener('mouseenter', () => { rail.style.background = th.iconHoverBg; });
-    rail.addEventListener('mouseleave', () => { rail.style.background = theme().bg; });
-    rail.addEventListener('click', () => expand());
+
+    expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.title = '展开侧边栏';
+    expandBtn.setAttribute('aria-label', '展开侧边栏');
+    expandBtn.style.cssText = `
+      width:26px; height:26px; flex-shrink:0; border:none; border-radius:6px;
+      padding:0; cursor:pointer; background:transparent;
+      display:flex; align-items:center; justify-content:center;
+    `;
+    expandBtn.innerHTML = railIcon(th.icon);
+    expandBtn.addEventListener('mouseenter', () => { expandBtn.style.background = th.iconHoverBg; });
+    expandBtn.addEventListener('mouseleave', () => { expandBtn.style.background = 'transparent'; });
+    expandBtn.addEventListener('click', () => expand());
+    rail.appendChild(expandBtn);
+
+    railLinks = document.createElement('div');
+    railLinks.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:6px; width:100%;';
+    rail.appendChild(railLinks);
     host.appendChild(rail);
+    renderRailLinks();
 
     // 拖拽调宽条（展开态）
     handle = document.createElement('div');
@@ -103,6 +133,14 @@
     document.documentElement.appendChild(host);
     setMargin(RAIL_W, false);
     darkMQ.addEventListener('change', applyTheme);
+    window.addEventListener('resize', onResize);
+    chrome.storage.onChanged.addListener(onStorageChange);
+  }
+
+  function onResize() { renderRailLinks(); }
+
+  function onStorageChange(changes, area) {
+    if (area === 'local' && changes.quickLinks) renderRailLinks();
   }
 
   function railIcon(color) {
@@ -119,16 +157,60 @@
     host.style.background = th.bg;
     host.style.borderLeftColor = th.border;
     rail.style.background = th.bg;
-    rail.innerHTML = railIcon(th.icon);
+    expandBtn.innerHTML = railIcon(th.icon);
     if (iframe) iframe.style.background = th.bg;
+  }
+
+  /* ---------- 窄栏常用网站图标 ---------- */
+  function renderRailLinks() {
+    if (!railLinks) return;
+    chrome.storage.local.get(['quickLinks'], (res) => {
+      if (!railLinks) return;
+      const links = res.quickLinks || DEFAULT_LINKS;
+      // 按视口高度限制图标数量，避免溢出
+      const max = Math.max(0, Math.min(links.length, Math.floor((window.innerHeight - 110) / 32)));
+      railLinks.innerHTML = '';
+      links.slice(0, max).forEach((l) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.title = l.name;
+        b.setAttribute('aria-label', '在侧边栏打开 ' + l.name);
+        b.textContent = (l.name[0] || '?').toUpperCase();
+        b.style.cssText = `
+          width:24px; height:24px; flex-shrink:0; border:none; border-radius:6px;
+          background:#0078d4; color:#fff; font-size:12px; font-weight:600;
+          cursor:pointer; padding:0; line-height:24px; text-align:center;
+        `;
+        b.addEventListener('mouseenter', () => { b.style.background = '#106ebe'; });
+        b.addEventListener('mouseleave', () => { b.style.background = '#0078d4'; });
+        b.addEventListener('click', () => openInSidebar(l.url));
+        railLinks.appendChild(b);
+      });
+    });
+  }
+
+  // 点击窄栏图标：展开侧边栏并在内置浏览器视图中打开该网址
+  function openInSidebar(url) {
+    pendingUrl = url;
+    expand();
+    flushPending();
+  }
+
+  function flushPending() {
+    if (pendingUrl && iframeReady && iframe) {
+      try { iframe.contentWindow.postMessage({ action: 'openUrl', url: pendingUrl }, '*'); } catch (e) {}
+      pendingUrl = null;
+    }
   }
 
   function ensureIframe() {
     if (iframe) return;
+    iframeReady = false;
     iframe = document.createElement('iframe');
     iframe.src = chrome.runtime.getURL('sidebar.html');
     iframe.setAttribute('aria-label', '侧边栏');
     iframe.style.cssText = `flex:1; height:100%; border:none; display:none; background:${theme().bg};`;
+    iframe.addEventListener('load', () => { iframeReady = true; flushPending(); });
     host.appendChild(iframe);
   }
 
@@ -149,6 +231,7 @@
     if (!animate) requestAnimationFrame(() => setTransition(true));
 
     chrome.storage.local.set({ sidebarExpanded: true });
+    flushPending();
   }
 
   function collapse(animate = true) {
@@ -182,10 +265,14 @@
   }
 
   function destroy() {
-    if (host) { host.remove(); host = null; rail = handle = iframe = null; }
+    if (host) { host.remove(); host = null; rail = railLinks = expandBtn = handle = iframe = null; }
     expanded = false;
+    iframeReady = false;
+    pendingUrl = null;
     clearMargin();
     darkMQ.removeEventListener('change', applyTheme);
+    window.removeEventListener('resize', onResize);
+    chrome.storage.onChanged.removeListener(onStorageChange);
   }
 
   /* ---------- 拖拽调宽 ---------- */
