@@ -15,12 +15,12 @@
   const STRIP_BG = 'rgba(0,120,212,0.28)';
 
   const DEFAULT_LINKS = [
-    { name:'Gmail', url:'https://mail.google.com' },
     { name:'YouTube', url:'https://youtube.com' },
-    { name:'Google Drive', url:'https://drive.google.com' },
+    { name:'Gemini', url:'https://gemini.google.com' },
+    { name:'Bing', url:'https://www.bing.com' },
     { name:'GitHub', url:'https://github.com' },
-    { name:'ChatGPT', url:'https://chat.openai.com' },
-    { name:'Wikipedia', url:'https://en.wikipedia.org' },
+    { name:'ChatGPT', url:'https://chatgpt.com' },
+    { name:'Wikipedia', url:'https://www.wikipedia.org' },
     { name:'Reddit', url:'https://reddit.com' },
     { name:'X', url:'https://x.com' },
   ];

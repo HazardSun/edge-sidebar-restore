@@ -145,13 +145,14 @@ function siteName(url) {
 }
 
 // 首次安装时的默认快捷链接（搜索页 / 链接页 / 页面快捷入口共用）
+// 筛选原则：剥离禁嵌头后可在侧边栏内嵌打开（Gmail/Drive 因登录态隔离不可用，已移除）
 const DEFAULT_QUICK_LINKS = [
-  { name:'Gmail', url:'https://mail.google.com' },
   { name:'YouTube', url:'https://youtube.com' },
-  { name:'Google Drive', url:'https://drive.google.com' },
+  { name:'Gemini', url:'https://gemini.google.com' },
+  { name:'Bing', url:'https://www.bing.com' },
   { name:'GitHub', url:'https://github.com' },
-  { name:'ChatGPT', url:'https://chat.openai.com' },
-  { name:'Wikipedia', url:'https://en.wikipedia.org' },
+  { name:'ChatGPT', url:'https://chatgpt.com' },
+  { name:'Wikipedia', url:'https://www.wikipedia.org' },
   { name:'Reddit', url:'https://reddit.com' },
   { name:'X', url:'https://x.com' },
 ];

@@ -11,12 +11,19 @@
   "host_permissions": [
     "*://*.google.com/*",
     "*://*.youtube.com/*",
-    "*://*.gmail.com/*",
     "*://*.googlevideo.com/*",
     "*://*.ytimg.com/*",
     "*://*.ggpht.com/*",
     "*://*.googleusercontent.com/*",
-    "*://*.gstatic.com/*"
+    "*://*.gstatic.com/*",
+    "*://*.bing.com/*",
+    "*://*.github.com/*",
+    "*://*.reddit.com/*",
+    "*://*.x.com/*",
+    "*://*.twitter.com/*",
+    "*://*.twimg.com/*",
+    "*://*.chatgpt.com/*",
+    "*://*.openai.com/*"
   ],
   "declarative_net_request": {
     "rule_resources": [
