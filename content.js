@@ -102,16 +102,23 @@
             cursor:pointer; padding:0; line-height:24px; text-align:center;
             display:flex; align-items:center; justify-content:center;
           `;
-          // 优先使用网站真实 favicon，失败时保留首字母
-          let host = '';
-          try { host = new URL(l.url).hostname; } catch (e) {}
-          if (host) {
+          // 优先网站自身 /favicon.ico（内网站点可直连），失败降级 Google 服务，再失败保留首字母
+          let u = null;
+          try { u = new URL(l.url); } catch (e) {}
+          if (u && u.hostname) {
             const img = document.createElement('img');
             img.alt = '';
-            img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=32';
             img.style.cssText = 'width:16px; height:16px; display:block; border-radius:3px;';
+            let stage = 0;
             img.addEventListener('load', () => { b.textContent = ''; b.appendChild(img); });
-            img.addEventListener('error', () => { /* 保留首字母兜底 */ });
+            img.addEventListener('error', () => {
+              if (stage === 0) {
+                stage = 1;
+                img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(u.hostname) + '&sz=32';
+              }
+              /* Google 服务也失败时保留首字母兜底 */
+            });
+            img.src = u.origin + '/favicon.ico';
           }
           b.addEventListener('mouseenter', () => { b.style.background = '#e8f0fa'; });
           b.addEventListener('mouseleave', () => { b.style.background = '#fff'; });

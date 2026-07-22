@@ -114,24 +114,34 @@ const Search = {
 
 function escHtml(s) { return String(s).replace(/[&<>"]/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
 
-// 网站 favicon（Google favicon 服务），加载失败时回退为首字母方块
+// 网站 favicon：优先站点自身 /favicon.ico（内网站点浏览器可直连），
+// 失败降级 Google favicon 服务，再失败回退首字母方块
 function faviconHTML(l) {
   const letter = (l.name[0] || '?').toUpperCase();
-  let host = '';
-  try { host = new URL(l.url).hostname; } catch (e) { return `<div class="link-letter">${letter}</div>`; }
+  let host = '', origin = '';
+  try {
+    const u = new URL(l.url);
+    host = u.hostname; origin = u.origin;
+  } catch (e) { return `<div class="link-letter">${letter}</div>`; }
   if (!host) return `<div class="link-letter">${letter}</div>`;
-  return `<img class="link-favicon" data-letter="${letter}" alt="" loading="lazy"
-    src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64">`;
+  return `<img class="link-favicon" data-letter="${letter}" data-stage="0"
+    data-host="${escHtml(host)}" data-origin="${escHtml(origin)}" alt="" loading="lazy"
+    src="${escHtml(origin)}/favicon.ico">`;
 }
 
-// 渲染后调用：为加载失败的 favicon 换上首字母方块
+// 渲染后调用：favicon 两级降级（站点 /favicon.ico → Google 服务 → 首字母）
 function bindFaviconFallback(container) {
   container.querySelectorAll('.link-favicon').forEach(img => {
     img.addEventListener('error', () => {
-      const d = document.createElement('div');
-      d.className = 'link-letter';
-      d.textContent = img.dataset.letter || '?';
-      img.replaceWith(d);
+      if (img.dataset.stage === '0') {
+        img.dataset.stage = '1';
+        img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(img.dataset.host) + '&sz=64';
+      } else {
+        const d = document.createElement('div');
+        d.className = 'link-letter';
+        d.textContent = img.dataset.letter || '?';
+        img.replaceWith(d);
+      }
     });
   });
 }
