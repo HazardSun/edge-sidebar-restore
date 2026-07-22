@@ -2,7 +2,7 @@
 
 恢复 Edge 浏览器被取消的侧边栏功能 — 基于 Edge 原生 **Side Panel API** 的浏览器级面板，网页**零遮挡**，集分屏浏览、搜索、计算器、单位换算、实时汇率、快速链接、笔记、时钟于一体的工具箱。
 
-当前版本：**v0.2.0**
+当前版本：**v0.2.1**
 
 ## 目录
 
@@ -21,8 +21,8 @@
 | 模块 | 说明 |
 |---|---|
 | 原生侧边栏 | `chrome.sidePanel` 实现，浏览器真正缩小视口，任何网页（fixed 导航、100vw 布局）都不被遮挡 |
-| 页面快捷入口 | 网页右缘 4px 悬停细条，滑出展开按钮 + 已收藏网站图标，一键打开面板并直达网站 |
-| 分屏浏览 | 侧边栏内嵌浏览器视图，链接在面板内打开，无需离开当前页面 |
+| 页面快捷入口 | 网页右缘 4px 悬停细条，滑出展开按钮 + 已收藏网站 favicon 图标，一键打开面板并直达网站 |
+| 分屏浏览 | 侧边栏内嵌浏览器视图，顶栏实时显示当前网站名；对禁嵌站点自动剥离 XFO/CSP 响应头 |
 | 新标签页 | 新标签页直接跳转 Bing 首页（普通网页，快捷入口与面板均可使用） |
 
 ## 交互方式
@@ -32,7 +32,7 @@
 | 打开/关闭侧边栏 | 点击工具栏扩展图标 |
 | 打开/关闭侧边栏 | 快捷键 `Ctrl+Shift+Y`（可在 `edge://extensions/shortcuts` 修改） |
 | 打开侧边栏 | 网页右缘 4px 细条 → 悬停 → 点击 « 按钮 |
-| 直达某个网站 | 悬停细条 → 点击网站图标（面板打开后内置浏览器直达） |
+| 直达某个网站 | 悬停细条 → 点击网站 favicon（面板打开后内置浏览器直达） |
 | 调整面板宽度 | 拖拽面板左边缘（浏览器原生） |
 | 打开/关闭 | 右键扩展图标 → 在侧边栏中打开 |
 
@@ -44,9 +44,15 @@
 | 计算器 | 基础四则运算、正负号、取余；支持键盘输入（数字、运算符、Enter、Esc） |
 | 单位换算 | 长度、重量、温度、面积、体积、速度 6 类 25 个单位 |
 | 实时汇率 | 28 种货币；USD 基准一次拉取 + 本地交叉汇率计算，切换币种零网络延迟；双数据源自动回退；本地缓存 30 分钟并显示数据日期 |
-| 快速链接 | 可增删的网址收藏，存储于本地，三处（链接页/搜索页/快捷入口）实时同步 |
+| 快速链接 | 可增删的网址收藏，图标使用网站真实 favicon（加载失败回退首字母）；三处（链接页/搜索页/快捷入口）实时同步 |
 | 笔记 | 自动保存便签（500ms 防抖），带保存状态提示 |
 | 时钟 | 实时时间、日期、时段问候语、每日备忘（自动保存） |
+
+### 默认收藏站点
+
+YouTube、Gemini、Bing、GitHub、ChatGPT、Wikipedia、Reddit、X。
+
+> 说明：默认列表已剔除 Gmail / Google Drive——Google 登录体系拒绝在嵌入上下文中登录（Cookie 隔离），任何扩展都无法绕过。Gemini、ChatGPT、X 等登录型应用未登录浏览正常，嵌内登录可能被各自风控拒绝。
 
 ## 安装
 
@@ -82,6 +88,13 @@ v0.0.x 版本采用 Content Script 注入 iframe + `body margin` 让位的方案
 - **网站直达双通道**：点击细条上的网站图标时，若面板未打开，目标网址写入 `storage.pendingOpenUrl`，面板启动后读取并打开；若面板已打开，Service Worker 广播 `openUrl` 消息直接送达（同址去重防止双通道重复加载）。
 - **数据共享**：快捷链接、笔记、汇率缓存统一存于 `chrome.storage.local`，面板、快捷入口通过 `storage.onChanged` 实时同步。
 
+### 内嵌浏览与禁嵌头剥离（DNR）
+
+许多站点（GitHub、Reddit、X、Bing 等）通过 `X-Frame-Options` 或 CSP `frame-ancestors` 禁止被 iframe 嵌套。本扩展通过 `declarativeNetRequest`（静态规则集 `rules.json`）**仅对这些站点的子框架请求**剥离禁嵌响应头，使内嵌浏览可用：
+
+- 作用域严格限定在规则列出的 15 个域名 + `sub_frame` 资源类型，不影响正常标签页浏览和其他网站
+- 登录型应用（Gmail 等）的嵌内登录限制属于 Cookie 隔离策略，不在响应头层面，无法通过此方式解除
+
 ## 文件结构
 
 ```
@@ -89,6 +102,7 @@ edge-sidebar-restore/
 ├── manifest.json          # 扩展配置（MV3）
 ├── background.js          # Service Worker：面板行为配置 + 快捷入口消息转发
 ├── content.js             # 页面快捷入口（4px 悬停细条，仅注入普通网页）
+├── rules.json             # DNR 静态规则集：剥离指定站点 sub_frame 的禁嵌响应头
 ├── sidebar.html           # 侧边栏 UI（6 个工具标签页 + 内置浏览器视图）
 ├── sidebar.js             # 侧边栏交互逻辑（模块化：搜索/计算器/换算/汇率/链接/笔记/时钟/浏览器）
 ├── sidebar.css            # 侧边栏样式（深浅色主题跟随系统）
@@ -107,10 +121,13 @@ edge-sidebar-restore/
 |---|---|
 | `storage` | 保存快捷链接、笔记、设置、汇率缓存（全部本地） |
 | `sidePanel` | 使用原生侧边栏 |
+| `declarativeNetRequestWithHostAccess` | 剥离指定站点子框架响应的禁嵌头（XFO/CSP），使内嵌浏览可用 |
+| `host_permissions`（15 个域名） | 上述 DNR 规则的作用域：google/youtube/bing/github/reddit/x/twitter/chatgpt 等默认收藏站点 |
 | `content_scripts`（`<all_urls>`） | 仅在普通网页注入 4px 快捷入口细条；**不读取、不修改任何网页内容与布局** |
 
 - **无数据收集**：不上传任何信息，所有数据仅存于浏览器本地
 - 汇率数据源：[fawazahmed0/currency-api](https://github.com/fawazahmed0/exchange-api)（jsDelivr CDN，主）与 [open.er-api.com](https://www.exchangerate-api.com)（备），仅在使用汇率功能时请求，结果本地缓存 30 分钟
+- 网站 favicon 通过 Google favicon 服务（`google.com/s2/favicons`）获取，仅请求域名对应的图标
 
 ## 兼容性
 
@@ -118,6 +135,12 @@ edge-sidebar-restore/
 - 深色/浅色主题跟随系统
 
 ## 版本历史
+
+### v0.2.1
+- 内置浏览器顶栏改为显示当前网站名（同源时升级为页面 title），关闭后恢复默认
+- 收藏网址图标改用网站真实 favicon，加载失败自动回退首字母
+- 新增 DNR 规则集：对 15 个默认收藏站点的子框架请求剥离 XFO/CSP 禁嵌头，YouTube/GitHub/Bing 等可内嵌打开
+- 默认收藏移除 Gmail / Google Drive（Google 登录体系拒绝嵌入登录），新增 Gemini、Bing；ChatGPT 更新为 chatgpt.com
 
 ### v0.2.0
 - 架构迁移至原生 **Side Panel API**，彻底消除网页遮挡（fixed / 100vw 元素均可正确让位）
