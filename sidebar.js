@@ -10,6 +10,22 @@ document.addEventListener('DOMContentLoaded', () => {
   Clock.init();
   DailyNote.init();
   Browser.init();
+
+  // 页面快捷入口带来的待打开网址（面板刚启动时兜底）
+  chrome.storage.local.get(['pendingOpenUrl'], (res) => {
+    if (res.pendingOpenUrl) {
+      chrome.storage.local.remove('pendingOpenUrl');
+      Browser.open(res.pendingOpenUrl);
+    }
+  });
+});
+
+// 页面快捷入口：面板已打开时直接在内置浏览器视图中打开网址
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.action === 'openUrl' && typeof msg.url === 'string') {
+    chrome.storage.local.remove('pendingOpenUrl');
+    Browser.open(msg.url);
+  }
 });
 
 const TabSystem = {
@@ -507,6 +523,7 @@ const Browser = {
   isOpen() { return !this.view.classList.contains('hidden'); },
 
   open(url) {
+    if (url === this.currentUrl && this.isOpen()) return;
     document.getElementById('content').classList.add('hidden');
     this.view.classList.remove('hidden');
     this.currentUrl = url;
