@@ -74,7 +74,7 @@ const Search = {
   loadQuickLinks() {
     const grid = document.getElementById('search-quick-links');
     chrome.storage.local.get(['quickLinks'], (res) => {
-      this.links = res.quickLinks || [];
+      this.links = res.quickLinks || DEFAULT_QUICK_LINKS;
       grid.innerHTML = this.links.map((l, i) => `
         <div class="link-item" data-url="${l.url}">
           <button class="del-btn" data-i="${i}">&times;</button>
@@ -112,6 +112,18 @@ const Search = {
 };
 
 function escHtml(s) { return String(s).replace(/[&<>"]/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
+
+// 首次安装时的默认快捷链接（搜索页 / 链接页 / 页面快捷入口共用）
+const DEFAULT_QUICK_LINKS = [
+  { name:'Gmail', url:'https://mail.google.com' },
+  { name:'YouTube', url:'https://youtube.com' },
+  { name:'Google Drive', url:'https://drive.google.com' },
+  { name:'GitHub', url:'https://github.com' },
+  { name:'ChatGPT', url:'https://chat.openai.com' },
+  { name:'Wikipedia', url:'https://en.wikipedia.org' },
+  { name:'Reddit', url:'https://reddit.com' },
+  { name:'X', url:'https://x.com' },
+];
 
 const Calculator = {
   d: '0', op: null, op2: null, reset: false,
@@ -398,16 +410,7 @@ const QuickLinks = {
   },
   load() {
     chrome.storage.local.get(['quickLinks'], (res) => {
-      this.links = res.quickLinks || [
-        { name:'Gmail', url:'https://mail.google.com' },
-        { name:'YouTube', url:'https://youtube.com' },
-        { name:'Google Drive', url:'https://drive.google.com' },
-        { name:'GitHub', url:'https://github.com' },
-        { name:'ChatGPT', url:'https://chat.openai.com' },
-        { name:'Wikipedia', url:'https://en.wikipedia.org' },
-        { name:'Reddit', url:'https://reddit.com' },
-        { name:'X', url:'https://x.com' },
-      ];
+      this.links = res.quickLinks || DEFAULT_QUICK_LINKS;
       this.render();
     });
   },
