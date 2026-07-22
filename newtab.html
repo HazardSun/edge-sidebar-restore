@@ -82,6 +82,14 @@ body {
 .sidebar-wrap { width:360px; height:100vh; flex-shrink:0; border-left:1px solid #e0e0e0; transition:width .22s cubic-bezier(0.4,0,0.2,1); overflow:hidden; position:relative; }
 .sidebar-wrap.collapsed { width:0; border-left:none; }
 .sidebar-wrap iframe { width:100%; height:100%; border:none; display:block; }
+#nt-collapse {
+  position:absolute; left:0; top:50%; transform:translateY(-50%); z-index:2;
+  width:18px; height:56px; border:1px solid #e0e0e0; border-left:none;
+  border-radius:0 6px 6px 0; background:#f5f5f5; color:#666;
+  font-size:14px; cursor:pointer; padding:0; line-height:1;
+}
+#nt-collapse:hover { color:#0078d4; }
+@media (prefers-color-scheme:dark) { #nt-collapse { background:#2d2d2d; border-color:#3d3d3d; color:#999; } #nt-collapse:hover { color:#4ba0e8; } }
 .pill-expand {
   position:fixed; right:0; top:50%; transform:translateY(-50%);
   width:44px; height:44px; border-radius:8px 0 0 8px;
@@ -114,6 +122,7 @@ body {
   <div id="nt-links" class="links-grid"></div>
 </div>
 <div class="sidebar-wrap" id="sidebar-wrap">
+  <button id="nt-collapse" title="折叠侧边栏">&#x203A;</button>
   <iframe src="sidebar.html" id="sb-iframe"></iframe>
 </div>
 <div class="pill-expand" id="nt-pill">

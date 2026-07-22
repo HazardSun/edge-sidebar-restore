@@ -18,16 +18,7 @@ const pill = document.getElementById('nt-pill');
 let ntExpanded = true;
 
 pill.addEventListener('click', ntExpand);
-
-let lastNtCmd = 0;
-setInterval(() => {
-  chrome.storage.local.get('ntCmd', (res) => {
-    if (res.ntCmd && res.ntCmd !== lastNtCmd) {
-      lastNtCmd = res.ntCmd;
-      if (ntExpanded) ntCollapse();
-    }
-  });
-}, 150);
+document.getElementById('nt-collapse').addEventListener('click', ntCollapse);
 
 chrome.storage.local.get('ntSidebarExpanded', (res) => {
   if (res.ntSidebarExpanded === false) ntCollapse();

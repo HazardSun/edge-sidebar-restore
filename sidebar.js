@@ -10,20 +10,6 @@ document.addEventListener('DOMContentLoaded', () => {
   Clock.init();
   DailyNote.init();
   Browser.init();
-
-  function collapseSidebar() {
-    chrome.runtime.sendMessage({ action: 'collapseSidebar' });
-    chrome.storage.local.set({ ntCmd: Date.now() });
-  }
-  document.getElementById('collapse-btn').addEventListener('click', collapseSidebar);
-  document.getElementById('close-btn').addEventListener('click', collapseSidebar);
-});
-
-// 内容脚本（窄栏网站图标）请求在内置浏览器视图中打开网址
-window.addEventListener('message', (e) => {
-  if (e.data && e.data.action === 'openUrl' && typeof e.data.url === 'string') {
-    Browser.open(e.data.url);
-  }
 });
 
 const TabSystem = {

@@ -1,43 +1,38 @@
 {
   "manifest_version": 3,
   "name": "Edge 侧边栏恢复",
-  "version": "0.1.0",
-  "description": "恢复 Edge 被取消的侧边栏功能 — 常驻显示、分屏浏览、搜索、计算器、单位换算、快速链接、笔记",
+  "version": "1.0.0",
+  "description": "恢复 Edge 被取消的侧边栏功能 — 原生侧面板零遮挡、分屏浏览、搜索、计算器、单位换算、汇率、快速链接、笔记",
   "permissions": [
-    "storage"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle",
-      "all_frames": false
-    }
+    "storage",
+    "sidePanel"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "side_panel": {
+    "default_path": "sidebar.html"
+  },
   "action": {
-    "default_title": "切换侧边栏",
+    "default_title": "打开/关闭侧边栏",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "打开/关闭侧边栏"
+    }
+  },
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
-  "web_accessible_resources": [
-    {
-      "resources": ["sidebar.html"],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
