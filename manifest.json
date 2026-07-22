@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Edge 侧边栏恢复",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "恢复 Edge 被取消的侧边栏功能 — 常驻显示、分屏浏览、搜索、计算器、单位换算、快速链接、笔记",
   "permissions": [
     "storage"

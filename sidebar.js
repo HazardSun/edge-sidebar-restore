@@ -19,11 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('close-btn').addEventListener('click', collapseSidebar);
 });
 
-window.addEventListener('message', (e) => {
-  if (e.data && e.data.action === 'expand') {
-  }
-});
-
 const TabSystem = {
   init() {
     document.querySelectorAll('.tab-btn').forEach(tab => {
@@ -63,6 +58,9 @@ const Search = {
       document.getElementById('sq-form').style.display = 'none';
     });
     this.loadQuickLinks();
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.quickLinks) this.loadQuickLinks();
+    });
   },
   loadQuickLinks() {
     const grid = document.getElementById('search-quick-links');
@@ -104,10 +102,6 @@ const Search = {
   }
 };
 
-function linkHTML(l) {
-  const letter = l.name ? l.name[0].toUpperCase() : '?';
-  return `<div class="link-item" data-url="${l.url}"><div class="link-letter">${letter}</div><span>${escHtml(l.name)}</span></div>`;
-}
 function escHtml(s) { return String(s).replace(/[&<>"]/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
 
 const Calculator = {
@@ -239,7 +233,30 @@ const Converter = {
 const ExchangeRate = {
   currencies: { USD:'美元', EUR:'欧元', CNY:'人民币', JPY:'日元', GBP:'英镑', KRW:'韩元', HKD:'港币', TWD:'新台币', SGD:'新加坡元', AUD:'澳元', CAD:'加元', CHF:'瑞士法郎', THB:'泰铢', MXN:'墨西哥比索', INR:'印度卢比', BRL:'巴西雷亚尔', RUB:'卢布', NZD:'新西兰元', SEK:'瑞典克朗', NOK:'挪威克朗', DKK:'丹麦克朗', ZAR:'南非兰特', TRY:'土耳其里拉', PLN:'波兰兹罗提', PHP:'菲律宾比索', MYR:'马来西亚林吉特', IDR:'印尼盾', VND:'越南盾' },
   popular: ['USD','EUR','JPY','GBP','KRW','HKD','TWD','SGD','AUD','CAD','CHF','THB'],
-  rates: null, timer: null,
+  // 以 USD 为基准一次拉取全部汇率，本地计算交叉汇率：
+  // 切换币种/互换/刷新列表均不再触发网络请求，消除感知延迟。
+  SOURCES: [
+    {
+      url: 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json',
+      parse(d) {
+        if (!d || !d.usd) return null;
+        const r = {};
+        for (const k in d.usd) r[k.toUpperCase()] = d.usd[k];
+        return { rates: r, date: d.date || '' };
+      }
+    },
+    {
+      url: 'https://open.er-api.com/v6/latest/USD',
+      parse(d) {
+        if (!d || d.result !== 'success') return null;
+        return { rates: d.rates, date: (d.time_last_update_utc || '').replace(' +0000', '') };
+      }
+    }
+  ],
+  CACHE_KEY: 'exRateCache',
+  CACHE_TTL: 30 * 60 * 1000, // 缓存 30 分钟内不重复请求
+  rates: null, dataDate: '', lastFetch: 0, fetching: false, timer: null,
+
   init() {
     this.from = document.getElementById('ex-from');
     this.to = document.getElementById('ex-to');
@@ -248,15 +265,18 @@ const ExchangeRate = {
     this.rateDisplay = document.getElementById('ex-rate-display');
     this.popularRates = document.getElementById('ex-popular-rates');
     this.populateCurrencies();
+    // 先用缓存秒开显示，再后台刷新
+    this.loadCache();
     this.fetchRates();
     this.amount.addEventListener('input', () => this.convert());
-    this.from.addEventListener('change', () => { this.fetchRates(); });
+    this.from.addEventListener('change', () => { this.convert(); this.showPopular(); });
     this.to.addEventListener('change', () => this.convert());
-    document.getElementById('ex-refresh').addEventListener('click', () => this.fetchRates());
+    document.getElementById('ex-refresh').addEventListener('click', () => this.fetchRates(true));
     document.getElementById('ex-swap').addEventListener('click', () => this.swap());
     if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => this.fetchRates(), 300000);
+    this.timer = setInterval(() => this.fetchRates(), this.CACHE_TTL);
   },
+
   populateCurrencies() {
     const keys = Object.keys(this.currencies);
     const opts = keys.map(k => `<option value="${k}">${this.currencies[k]} (${k})</option>`).join('');
@@ -264,50 +284,94 @@ const ExchangeRate = {
     this.to.innerHTML = opts;
     this.from.value = 'USD'; this.to.value = 'CNY';
   },
-  fetchRates() {
-    const base = this.from.value;
-    const url = `https://open.er-api.com/v6/latest/${base}`;
-    this.rateDisplay.textContent = '加载中...';
-    fetch(url).then(r => r.json()).then(data => {
-      if (data.result === 'success') {
-        this.rates = data.rates;
-        this.lastFetch = Date.now();
+
+  loadCache() {
+    chrome.storage.local.get([this.CACHE_KEY], (res) => {
+      const c = res[this.CACHE_KEY];
+      if (c && c.rates) {
+        this.rates = c.rates;
+        this.dataDate = c.date || '';
+        this.lastFetch = c.ts || 0;
         this.convert();
         this.showPopular();
-      } else {
-        this.rateDisplay.textContent = '获取汇率失败';
       }
-    }).catch(() => {
-      this.rateDisplay.textContent = '网络错误';
     });
   },
+
+  saveCache() {
+    const c = { rates: this.rates, date: this.dataDate, ts: this.lastFetch };
+    chrome.storage.local.set({ [this.CACHE_KEY]: c });
+  },
+
+  async fetchRates(force) {
+    if (this.fetching) return;
+    if (!force && this.rates && Date.now() - this.lastFetch < this.CACHE_TTL) return;
+    this.fetching = true;
+    if (!this.rates) this.rateDisplay.textContent = '加载中...';
+    for (const src of this.SOURCES) {
+      try {
+        const resp = await fetch(src.url);
+        const parsed = src.parse(await resp.json());
+        if (parsed && parsed.rates && parsed.rates.CNY) {
+          this.rates = parsed.rates;
+          this.dataDate = parsed.date;
+          this.lastFetch = Date.now();
+          this.saveCache();
+          this.convert();
+          this.showPopular();
+          this.fetching = false;
+          return;
+        }
+      } catch (e) { /* 尝试下一个数据源 */ }
+    }
+    this.fetching = false;
+    if (!this.rates) this.rateDisplay.textContent = '获取汇率失败，请稍后重试';
+  },
+
+  // 交叉汇率：以 USD 为桥，f→t = rates[t] / rates[f]
+  crossRate(f, t) {
+    if (!this.rates) return null;
+    if (f === t) return 1;
+    if (!this.rates[f] || !this.rates[t]) return null;
+    return this.rates[t] / this.rates[f];
+  },
+
   convert() {
     if (!this.rates) { this.result.value = ''; return; }
     const amount = parseFloat(this.amount.value);
-    if (isNaN(amount) || amount <= 0) { this.result.value = ''; this.rateDisplay.textContent = '—'; return; }
+    if (isNaN(amount) || amount < 0) { this.result.value = ''; this.rateDisplay.textContent = '—'; return; }
     const f = this.from.value, t = this.to.value;
-    let rate;
-    if (f === t) rate = 1;
-    else rate = this.rates[t];
+    const rate = this.crossRate(f, t);
     if (rate == null) { this.result.value = 'N/A'; this.rateDisplay.textContent = '—'; return; }
     this.result.value = (amount * rate).toFixed(4);
-    const now = this.lastFetch ? new Date(this.lastFetch).toLocaleTimeString() : '';
-    this.rateDisplay.textContent = `1 ${f} = ${Number(rate).toFixed(4)} ${t}` + (now ? ` (${now})` : '');
+    const parts = [`1 ${f} = ${this.fmtRate(rate)} ${t}`];
+    if (this.dataDate) parts.push(`数据 ${this.dataDate}`);
+    this.rateDisplay.textContent = parts.join(' · ');
+    this.rateDisplay.title = this.lastFetch ? `本地更新：${new Date(this.lastFetch).toLocaleString('zh-CN')}` : '';
   },
+
+  fmtRate(r) {
+    // 小币种汇率过小/过大时保留更多有效位
+    if (r >= 1) return Number(r.toFixed(4)).toString();
+    return Number(r.toPrecision(4)).toString();
+  },
+
   showPopular() {
     if (!this.rates) return;
     const base = this.from.value;
     this.popularRates.innerHTML = this.popular.filter(c => c !== base).map(c => {
-      const rate = this.rates[c];
+      const rate = this.crossRate(base, c);
       if (rate == null) return '';
-      return `<div class="ex-pop-item"><span>${this.currencies[c]||c} (${c})</span><span>${rate.toFixed(4)}</span></div>`;
+      return `<div class="ex-pop-item"><span>${this.currencies[c]||c} (${c})</span><span>${this.fmtRate(rate)}</span></div>`;
     }).join('');
   },
+
   swap() {
     const f = this.from.value, t = this.to.value;
     this.from.value = t;
     this.to.value = f;
-    this.fetchRates();
+    this.convert();
+    this.showPopular();
   }
 };
 

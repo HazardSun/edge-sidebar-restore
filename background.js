@@ -30,7 +30,4 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === 'collapseSidebar' && sender.tab?.id) {
     chrome.tabs.sendMessage(sender.tab.id, { action: 'collapseSidebar' }).catch(() => {});
   }
-  if (msg.action === 'closeSidebarFromIframe') {
-    chrome.storage.local.set({ sidebarVisible: false, sidebarExpanded: false });
-  }
 });
