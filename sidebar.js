@@ -83,6 +83,7 @@ const Search = {
         </div>
       `).join('');
       bindFaviconFallback(grid);
+      applyCachedFavicons(grid);
       grid.querySelectorAll('.link-item').forEach(el => {
         el.addEventListener('click', (e) => {
           if (e.target.closest('.del-btn')) return;
@@ -129,6 +130,64 @@ function faviconHTML(l) {
     src="${escHtml(origin)}/favicon.ico">`;
 }
 
+// favicon 本地缓存：data URL 存 chrome.storage.local，弱网/离线也能显示
+const FaviconCache = {
+  KEY: 'faviconCache',
+  TTL: 7 * 24 * 3600 * 1000, // 7 天
+  MAX: 300,
+  mem: null,
+  async load() {
+    if (this.mem) return;
+    const r = await chrome.storage.local.get(this.KEY);
+    this.mem = r[this.KEY] || {};
+  },
+  async get(host) {
+    await this.load();
+    const c = this.mem[host];
+    return (c && Date.now() - c.ts < this.TTL) ? c.d : null;
+  },
+  async set(host, d) {
+    await this.load();
+    this.mem[host] = { d, ts: Date.now() };
+    const keys = Object.keys(this.mem);
+    if (keys.length > this.MAX) { // LRU 清理最旧条目
+      keys.sort((a, b) => this.mem[a].ts - this.mem[b].ts);
+      keys.slice(0, keys.length - this.MAX).forEach(k => delete this.mem[k]);
+    }
+    try { await chrome.storage.local.set({ [this.KEY]: this.mem }); } catch (e) {}
+  },
+  // 通过 Google s2 抓取并缓存（扩展页对 google.com 有 host 权限，可跨域 fetch）
+  async ensure(host) {
+    if (await this.get(host)) return;
+    try {
+      const resp = await fetch('https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=64');
+      if (!resp.ok) return;
+      const blob = await resp.blob();
+      const d = await new Promise((res) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.readAsDataURL(blob);
+      });
+      if (typeof d === 'string' && d.startsWith('data:image')) await this.set(host, d);
+    } catch (e) { /* 离线等情况忽略 */ }
+  }
+};
+
+// 渲染后调用：命中缓存直接用本地 data URL；未命中后台抓取建缓存
+function applyCachedFavicons(container) {
+  container.querySelectorAll('.link-favicon').forEach(async img => {
+    const host = img.dataset.host;
+    if (!host) return;
+    const cached = await FaviconCache.get(host);
+    if (cached) {
+      img.dataset.stage = '2'; // 标记已用缓存，禁用降级链
+      img.src = cached;
+    } else {
+      FaviconCache.ensure(host);
+    }
+  });
+}
+
 // 渲染后调用：favicon 两级降级（站点 /favicon.ico → Google 服务 → 首字母）
 function bindFaviconFallback(container) {
   container.querySelectorAll('.link-favicon').forEach(img => {
@@ -136,12 +195,16 @@ function bindFaviconFallback(container) {
       if (img.dataset.stage === '0') {
         img.dataset.stage = '1';
         img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(img.dataset.host) + '&sz=64';
-      } else {
+      } else if (img.dataset.stage === '1') {
         const d = document.createElement('div');
         d.className = 'link-letter';
         d.textContent = img.dataset.letter || '?';
         img.replaceWith(d);
       }
+    });
+    // Google 源加载成功时顺手建缓存
+    img.addEventListener('load', () => {
+      if (img.dataset.stage === '1') FaviconCache.ensure(img.dataset.host);
     });
   });
 }
@@ -465,6 +528,7 @@ const QuickLinks = {
       </div>
     `).join('');
     bindFaviconFallback(this.grid);
+    applyCachedFavicons(this.grid);
     this.grid.querySelectorAll('.link-item').forEach(el => {
       el.addEventListener('click', (e) => {
         if (e.target.closest('.del-btn')) return;

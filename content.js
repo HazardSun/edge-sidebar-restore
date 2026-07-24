@@ -86,8 +86,10 @@
     function renderIcons() {
       const th = theme();
       expandBtn.innerHTML = chevron(th.icon);
-      chrome.storage.local.get(['quickLinks'], (res) => {
+      chrome.storage.local.get(['quickLinks', 'faviconCache'], (res) => {
         const links = res.quickLinks || DEFAULT_LINKS;
+        const fc = res.faviconCache || {};
+        const FC_TTL = 7 * 24 * 3600 * 1000;
         const max = Math.max(0, Math.min(links.length, Math.floor((window.innerHeight - 110) / 32)));
         iconsBox.innerHTML = '';
         links.slice(0, max).forEach((l) => {
@@ -102,23 +104,28 @@
             cursor:pointer; padding:0; line-height:24px; text-align:center;
             display:flex; align-items:center; justify-content:center;
           `;
-          // 优先网站自身 /favicon.ico（内网站点可直连），失败降级 Google 服务，再失败保留首字母
           let u = null;
           try { u = new URL(l.url); } catch (e) {}
           if (u && u.hostname) {
             const img = document.createElement('img');
             img.alt = '';
             img.style.cssText = 'width:16px; height:16px; display:block; border-radius:3px;';
-            let stage = 0;
             img.addEventListener('load', () => { b.textContent = ''; b.appendChild(img); });
-            img.addEventListener('error', () => {
-              if (stage === 0) {
-                stage = 1;
-                img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(u.hostname) + '&sz=32';
-              }
-              /* Google 服务也失败时保留首字母兜底 */
-            });
-            img.src = u.origin + '/favicon.ico';
+            const cached = fc[u.hostname];
+            if (cached && Date.now() - cached.ts < FC_TTL) {
+              // 命中本地缓存：零网络直接使用
+              img.src = cached.d;
+            } else {
+              // 两级降级：站点 /favicon.ico（内网可直连）→ Google 服务，失败保留首字母
+              let stage = 0;
+              img.addEventListener('error', () => {
+                if (stage === 0) {
+                  stage = 1;
+                  img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(u.hostname) + '&sz=32';
+                }
+              });
+              img.src = u.origin + '/favicon.ico';
+            }
           }
           b.addEventListener('mouseenter', () => { b.style.background = '#e8f0fa'; });
           b.addEventListener('mouseleave', () => { b.style.background = '#fff'; });
