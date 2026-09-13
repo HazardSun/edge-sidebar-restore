@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Edge 侧边栏恢复",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "恢复 Edge 被取消的侧边栏功能 — 原生侧面板零遮挡、页面快捷入口、搜索、计算器、单位换算、汇率、快速链接、笔记",
   "permissions": [
     "storage",
     "sidePanel",
+    "favicon",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
@@ -40,6 +41,12 @@
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["_favicon/*"],
+      "matches": ["<all_urls>"]
     }
   ],
   "background": {

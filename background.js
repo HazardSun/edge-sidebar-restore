@@ -8,19 +8,15 @@ chrome.sidePanel
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || msg.action !== 'openSidePanel' || !sender.tab) return;
 
-  if (msg.url) {
-    // 面板未打开时由面板初始化读取；已打开时由下方广播直接处理
-    chrome.storage.local.set({ pendingOpenUrl: msg.url });
-  } else {
-    chrome.storage.local.remove('pendingOpenUrl');
-  }
+  // sidePanel.open 必须在用户手势的同步调用链中启动；存储写入与打开并行，
+  // 两者都完成后再广播。新面板也始终可从 pendingOpenUrl 读取兜底。
+  const pendingWrite = msg.url
+    ? chrome.storage.local.set({ pendingOpenUrl: msg.url })
+    : chrome.storage.local.remove('pendingOpenUrl');
+  const opening = chrome.sidePanel.open({ windowId: sender.tab.windowId });
 
-  chrome.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
-
-  if (msg.url) {
-    // 面板若已打开，300ms 后直接收到；若刚启动，初始化时读 pendingOpenUrl 兜底
-    setTimeout(() => {
-      chrome.runtime.sendMessage({ action: 'openUrl', url: msg.url }).catch(() => {});
-    }, 300);
-  }
+  Promise.all([pendingWrite, opening]).then(() => {
+    if (!msg.url) return;
+    chrome.runtime.sendMessage({ action: 'openUrl', url: msg.url }).catch(() => {});
+  }).catch((e) => console.error('处理侧边栏打开请求失败:', e));
 });

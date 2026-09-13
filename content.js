@@ -13,6 +13,9 @@
   const STRIP_W = 4;
   const RAIL_W = 32;
   const STRIP_BG = 'rgba(0,120,212,0.28)';
+  const FAVICON_CACHE_VERSION = 3;
+  let faviconWriteQueue = Promise.resolve();
+  let defaultFaviconSignaturePromise = null;
 
   const DEFAULT_LINKS = [
     { name:'YouTube', url:'https://youtube.com' },
@@ -37,6 +40,134 @@
       <path d="M17.6 7.4 16.2 6l-6 6 6 6 1.4-1.4L13 12z" fill="${color}"/>
       <path d="M12.6 7.4 11.2 6l-6 6 6 6 1.4-1.4L8 12z" fill="${color}" opacity="0.45"/>
     </svg>`;
+  }
+
+  function browserFaviconUrl(pageUrl, size) {
+    const url = new URL(chrome.runtime.getURL('/_favicon/'));
+    url.searchParams.set('pageUrl', pageUrl);
+    url.searchParams.set('size', String(size || 32));
+    return url.toString();
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('读取图标失败'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function blobSignature(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let hash = 2166136261;
+    for (const byte of bytes) {
+      hash ^= byte;
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${bytes.length}:${hash >>> 0}`;
+  }
+
+  function getDefaultFaviconSignature() {
+    if (!defaultFaviconSignaturePromise) {
+      defaultFaviconSignaturePromise = (async () => {
+        try {
+          const response = await fetch(browserFaviconUrl('https://invalid-favicon.localhost/', 32), { cache: 'no-store' });
+          return response.ok ? await blobSignature(await response.blob()) : null;
+        } catch (e) {
+          return null;
+        }
+      })();
+    }
+    return defaultFaviconSignaturePromise;
+  }
+
+  function cacheFaviconFromUrl(host, sourceUrl, options) {
+    const force = Boolean(options && options.force);
+    const rejectDefault = Boolean(options && options.rejectDefault);
+    const task = faviconWriteQueue.then(async () => {
+      try {
+        const current = await chrome.storage.local.get(['faviconCache', 'faviconCacheVersion']);
+        const cache = current.faviconCacheVersion === FAVICON_CACHE_VERSION
+          ? (current.faviconCache || {})
+          : {};
+        if (!force && cache[host] && typeof cache[host].d === 'string') return cache[host].d;
+        const response = await fetch(sourceUrl, { cache: 'no-store' });
+        if (!response.ok) return null;
+        const blob = await response.blob();
+        if (!blob.size || blob.size > 256 * 1024 || (blob.type && !blob.type.startsWith('image/'))) return null;
+        if (rejectDefault) {
+          const [signature, defaultSignature] = await Promise.all([
+            blobSignature(blob),
+            getDefaultFaviconSignature()
+          ]);
+          if (defaultSignature && signature === defaultSignature) return null;
+        }
+        const data = await blobToDataUrl(blob);
+        if (typeof data !== 'string' || !data.startsWith('data:image')) return null;
+        cache[host] = { d: data, ts: Date.now(), permanent: true };
+        await chrome.storage.local.set({
+          faviconCache: cache,
+          faviconCacheVersion: FAVICON_CACHE_VERSION
+        });
+        return data;
+      } catch (e) {
+        return null;
+      }
+    });
+    faviconWriteQueue = task.then(() => undefined, () => undefined);
+    return task;
+  }
+
+  function cacheBrowserFavicon(host, pageUrl, options) {
+    return cacheFaviconFromUrl(host, browserFaviconUrl(pageUrl, 32), {
+      force: Boolean(options && options.force),
+      rejectDefault: true
+    });
+  }
+
+  function pageFaviconCandidates() {
+    const result = [];
+    const seen = new Set();
+    const links = Array.from(document.querySelectorAll('link[rel][href]')).reverse();
+    for (const link of links) {
+      const rel = (link.getAttribute('rel') || '').toLowerCase();
+      const relTokens = rel.split(/\s+/);
+      if (!relTokens.includes('icon') && !rel.includes('apple-touch-icon')) continue;
+      try {
+        const url = new URL(link.href, location.href);
+        if (!['http:', 'https:', 'data:', 'blob:'].includes(url.protocol) || seen.has(url.href)) continue;
+        seen.add(url.href);
+        result.push(url.href);
+      } catch (e) {}
+    }
+    return result;
+  }
+
+  let pageFaviconTimer = null;
+  let forcePageFaviconRefresh = false;
+  function scheduleCurrentPageFavicon(delay, force) {
+    forcePageFaviconRefresh = forcePageFaviconRefresh || Boolean(force);
+    clearTimeout(pageFaviconTimer);
+    pageFaviconTimer = setTimeout(async () => {
+      const refreshExisting = forcePageFaviconRefresh;
+      forcePageFaviconRefresh = false;
+      let pageUrl;
+      try {
+        pageUrl = new URL(location.href);
+      } catch (e) {
+        return;
+      }
+      if (pageUrl.protocol !== 'http:' && pageUrl.protocol !== 'https:') return;
+
+      const candidates = pageFaviconCandidates();
+      candidates.push(pageUrl.origin + '/favicon.ico');
+      for (const sourceUrl of candidates) {
+        const saved = await cacheFaviconFromUrl(pageUrl.hostname, sourceUrl, { force: refreshExisting });
+        if (saved) return;
+      }
+      await cacheBrowserFavicon(pageUrl.hostname, pageUrl.href, { force: refreshExisting });
+    }, delay || 0);
   }
 
   function openPanel(url) {
@@ -83,13 +214,16 @@
     iconsBox.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:6px; width:100%;';
     railContent.appendChild(iconsBox);
 
+    let expanded = false;
+    let renderToken = 0;
     function renderIcons() {
+      const token = ++renderToken;
       const th = theme();
       expandBtn.innerHTML = chevron(th.icon);
-      chrome.storage.local.get(['quickLinks', 'faviconCache'], (res) => {
+      chrome.storage.local.get(['quickLinks', 'faviconCache', 'faviconCacheVersion'], (res) => {
+        if (token !== renderToken) return;
         const links = res.quickLinks || DEFAULT_LINKS;
-        const fc = res.faviconCache || {};
-        const FC_TTL = 7 * 24 * 3600 * 1000;
+        const fc = res.faviconCacheVersion === FAVICON_CACHE_VERSION ? (res.faviconCache || {}) : {};
         const max = Math.max(0, Math.min(links.length, Math.floor((window.innerHeight - 110) / 32)));
         iconsBox.innerHTML = '';
         links.slice(0, max).forEach((l) => {
@@ -105,37 +239,56 @@
             display:flex; align-items:center; justify-content:center;
           `;
           let u = null;
-          try { u = new URL(l.url); } catch (e) {}
+          try {
+            const parsed = new URL(l.url);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') u = parsed;
+          } catch (e) {}
           if (u && u.hostname) {
             const img = document.createElement('img');
             img.alt = '';
             img.style.cssText = 'width:16px; height:16px; display:block; border-radius:3px;';
             img.addEventListener('load', () => { b.textContent = ''; b.appendChild(img); });
             const cached = fc[u.hostname];
-            if (cached && Date.now() - cached.ts < FC_TTL) {
-              // 命中本地缓存：零网络直接使用
+            if (cached && typeof cached.d === 'string' && cached.d.startsWith('data:image')) {
+              // 永久缓存命中：零网络直接使用。
               img.src = cached.d;
             } else {
-              // 两级降级：站点 /favicon.ico（内网可直连）→ Google 服务，失败保留首字母
+              // 浏览器原生 favicon 能读取网站实际声明的图标；失败时再逐级降级。
               let stage = 0;
+              img.addEventListener('load', () => {
+                if (stage === 0) {
+                  cacheBrowserFavicon(u.hostname, u.href).then((saved) => {
+                    if (!saved && stage === 0 && img.isConnected) {
+                      stage = 1;
+                      img.src = u.origin + '/favicon.ico';
+                    }
+                  });
+                } else if (stage === 1 || stage === 2) {
+                  cacheFaviconFromUrl(u.hostname, img.src);
+                }
+              });
               img.addEventListener('error', () => {
                 if (stage === 0) {
                   stage = 1;
+                  img.src = u.origin + '/favicon.ico';
+                } else if (stage === 1) {
+                  stage = 2;
                   img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(u.hostname) + '&sz=32';
                 }
               });
-              img.src = u.origin + '/favicon.ico';
+              img.src = browserFaviconUrl(u.href, 32);
             }
           }
           b.addEventListener('mouseenter', () => { b.style.background = '#e8f0fa'; });
           b.addEventListener('mouseleave', () => { b.style.background = '#fff'; });
-          b.addEventListener('click', () => openPanel(l.url));
+          b.addEventListener('click', () => { if (u) openPanel(u.href); });
           iconsBox.appendChild(b);
         });
       });
     }
 
     host.addEventListener('mouseenter', () => {
+      expanded = true;
       const th = theme();
       host.style.width = RAIL_W + 'px';
       host.style.background = th.bg;
@@ -144,14 +297,41 @@
       renderIcons();
     });
     host.addEventListener('mouseleave', () => {
+      expanded = false;
       host.style.width = STRIP_W + 'px';
       host.style.background = STRIP_BG;
       host.style.boxShadow = 'none';
       railContent.style.opacity = '0';
     });
 
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && expanded &&
+          (changes.quickLinks || changes.faviconCache || changes.faviconCacheVersion)) {
+        renderIcons();
+      }
+    });
+    window.addEventListener('resize', () => { if (expanded) renderIcons(); });
+    darkMQ.addEventListener('change', () => {
+      if (!expanded) return;
+      const th = theme();
+      host.style.background = th.bg;
+      renderIcons();
+    });
+
     document.documentElement.appendChild(host);
   }
 
   create();
+  scheduleCurrentPageFavicon(200);
+  window.addEventListener('load', () => scheduleCurrentPageFavicon(500));
+  window.addEventListener('pageshow', () => scheduleCurrentPageFavicon(300));
+  if (document.head) {
+    const faviconObserver = new MutationObserver(() => scheduleCurrentPageFavicon(300, true));
+    faviconObserver.observe(document.head, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['href', 'rel']
+    });
+  }
 })();

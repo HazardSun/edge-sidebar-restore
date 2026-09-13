@@ -76,7 +76,7 @@ const Search = {
     chrome.storage.local.get(['quickLinks'], (res) => {
       this.links = res.quickLinks || DEFAULT_QUICK_LINKS;
       grid.innerHTML = this.links.map((l, i) => `
-        <div class="link-item" data-url="${l.url}">
+        <div class="link-item" data-url="${escHtml(l.url)}">
           <button class="del-btn" data-i="${i}">&times;</button>
           ${faviconHTML(l)}
           <span>${escHtml(l.name)}</span>
@@ -104,7 +104,8 @@ const Search = {
     const name = document.getElementById('sq-name').value.trim();
     let url = document.getElementById('sq-url').value.trim();
     if (!name || !url) return;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+    url = normalizeHttpUrl(url);
+    if (!url) return;
     this.links.push({ name, url });
     this.store(); this.loadQuickLinks();
     document.getElementById('sq-name').value = '';
@@ -115,96 +116,196 @@ const Search = {
 
 function escHtml(s) { return String(s).replace(/[&<>"]/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
 
-// 网站 favicon：优先站点自身 /favicon.ico（内网站点浏览器可直连），
-// 失败降级 Google favicon 服务，再失败回退首字母方块
-function faviconHTML(l) {
-  const letter = (l.name[0] || '?').toUpperCase();
-  let host = '', origin = '';
+function normalizeHttpUrl(value) {
+  let url = String(value || '').trim();
+  if (!url) return null;
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   try {
-    const u = new URL(l.url);
-    host = u.hostname; origin = u.origin;
-  } catch (e) { return `<div class="link-letter">${letter}</div>`; }
-  if (!host) return `<div class="link-letter">${letter}</div>`;
-  return `<img class="link-favicon" data-letter="${letter}" data-stage="0"
-    data-host="${escHtml(host)}" data-origin="${escHtml(origin)}" alt="" loading="lazy"
-    src="${escHtml(origin)}/favicon.ico">`;
+    const parsed = new URL(url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? parsed.href : null;
+  } catch (e) {
+    return null;
+  }
 }
 
-// favicon 本地缓存：data URL 存 chrome.storage.local，弱网/离线也能显示
+const FAVICON_CACHE_VERSION = 3;
+
+function browserFaviconUrl(pageUrl, size) {
+  const url = new URL(chrome.runtime.getURL('/_favicon/'));
+  url.searchParams.set('pageUrl', pageUrl);
+  url.searchParams.set('size', String(size || 32));
+  return url.toString();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('读取图标失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+let defaultFaviconSignaturePromise = null;
+async function blobSignature(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let hash = 2166136261;
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${bytes.length}:${hash >>> 0}`;
+}
+
+function getDefaultFaviconSignature() {
+  if (!defaultFaviconSignaturePromise) {
+    defaultFaviconSignaturePromise = (async () => {
+      try {
+        const response = await fetch(browserFaviconUrl('https://invalid-favicon.localhost/', 32), { cache: 'no-store' });
+        return response.ok ? await blobSignature(await response.blob()) : null;
+      } catch (e) {
+        return null;
+      }
+    })();
+  }
+  return defaultFaviconSignaturePromise;
+}
+
+// 网站 favicon：浏览器原生图标（能识别站点声明的真实 favicon）优先，
+// 再降级到 /favicon.ico、Google 服务和首字母方块。
+function faviconHTML(l) {
+  const letter = (String(l.name || '')[0] || '?').toUpperCase();
+  let host = '', origin = '', pageUrl = '';
+  try {
+    const u = new URL(l.url);
+    host = u.hostname; origin = u.origin; pageUrl = u.href;
+  } catch (e) { return `<div class="link-letter">${escHtml(letter)}</div>`; }
+  if (!host) return `<div class="link-letter">${escHtml(letter)}</div>`;
+  return `<img class="link-favicon" data-letter="${escHtml(letter)}" data-stage="0"
+    data-host="${escHtml(host)}" data-origin="${escHtml(origin)}"
+    data-page-url="${escHtml(pageUrl)}" alt="" loading="lazy"
+    src="${escHtml(browserFaviconUrl(pageUrl, 32))}">`;
+}
+
+// favicon 一旦成功获取便永久存入 chrome.storage.local；只有缓存格式升级时迁移一次。
 const FaviconCache = {
   KEY: 'faviconCache',
-  TTL: 7 * 24 * 3600 * 1000, // 7 天
-  MAX: 300,
+  VERSION_KEY: 'faviconCacheVersion',
   mem: null,
+  loading: null,
   async load() {
     if (this.mem) return;
-    const r = await chrome.storage.local.get(this.KEY);
-    this.mem = r[this.KEY] || {};
+    if (!this.loading) {
+      this.loading = (async () => {
+        const r = await chrome.storage.local.get([this.KEY, this.VERSION_KEY]);
+        if (r[this.VERSION_KEY] !== FAVICON_CACHE_VERSION) {
+          this.mem = {};
+          await chrome.storage.local.set({
+            [this.KEY]: {},
+            [this.VERSION_KEY]: FAVICON_CACHE_VERSION
+          });
+        } else {
+          this.mem = r[this.KEY] || {};
+        }
+      })();
+    }
+    await this.loading;
+    this.loading = null;
   },
   async get(host) {
     await this.load();
     const c = this.mem[host];
-    return (c && Date.now() - c.ts < this.TTL) ? c.d : null;
+    return c && typeof c.d === 'string' && c.d.startsWith('data:image') ? c.d : null;
   },
   async set(host, d) {
+    if (!host || typeof d !== 'string' || !d.startsWith('data:image')) return null;
     await this.load();
-    this.mem[host] = { d, ts: Date.now() };
-    const keys = Object.keys(this.mem);
-    if (keys.length > this.MAX) { // LRU 清理最旧条目
-      keys.sort((a, b) => this.mem[a].ts - this.mem[b].ts);
-      keys.slice(0, keys.length - this.MAX).forEach(k => delete this.mem[k]);
-    }
-    try { await chrome.storage.local.set({ [this.KEY]: this.mem }); } catch (e) {}
-  },
-  // 通过 Google s2 抓取并缓存（扩展页对 google.com 有 host 权限，可跨域 fetch）
-  async ensure(host) {
-    if (await this.get(host)) return;
+    this.mem[host] = { d, ts: Date.now(), permanent: true };
     try {
-      const resp = await fetch('https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=64');
-      if (!resp.ok) return;
-      const blob = await resp.blob();
-      const d = await new Promise((res) => {
-        const fr = new FileReader();
-        fr.onload = () => res(fr.result);
-        fr.readAsDataURL(blob);
+      await chrome.storage.local.set({
+        [this.KEY]: this.mem,
+        [this.VERSION_KEY]: FAVICON_CACHE_VERSION
       });
-      if (typeof d === 'string' && d.startsWith('data:image')) await this.set(host, d);
-    } catch (e) { /* 离线等情况忽略 */ }
+      return d;
+    } catch (e) {
+      console.warn('favicon 缓存写入失败:', e);
+      return null;
+    }
+  },
+  async fetchAndStore(host, url, rejectDefault) {
+    try {
+      const resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      if (!blob.size || blob.size > 256 * 1024 || (blob.type && !blob.type.startsWith('image/'))) return null;
+      if (rejectDefault) {
+        const [signature, defaultSignature] = await Promise.all([
+          blobSignature(blob),
+          getDefaultFaviconSignature()
+        ]);
+        if (defaultSignature && signature === defaultSignature) return null;
+      }
+      return await this.set(host, await blobToDataUrl(blob));
+    } catch (e) {
+      return null;
+    }
+  },
+  async ensure(host, pageUrl) {
+    const cached = await this.get(host);
+    if (cached) return cached;
+    return this.fetchAndStore(host, browserFaviconUrl(pageUrl, 32), true);
   }
 };
 
-// 渲染后调用：命中缓存直接用本地 data URL；未命中后台抓取建缓存
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.faviconCache && FaviconCache.mem) {
+    FaviconCache.mem = changes.faviconCache.newValue || {};
+  }
+});
+
+// 渲染后调用：命中永久缓存直接使用；未命中则读取浏览器保存的真实站点图标并缓存。
 function applyCachedFavicons(container) {
   container.querySelectorAll('.link-favicon').forEach(async img => {
-    const host = img.dataset.host;
-    if (!host) return;
+    const host = img.dataset.host, pageUrl = img.dataset.pageUrl;
+    if (!host || !pageUrl) return;
     const cached = await FaviconCache.get(host);
     if (cached) {
-      img.dataset.stage = '2'; // 标记已用缓存，禁用降级链
+      img.dataset.stage = 'cached';
       img.src = cached;
     } else {
-      FaviconCache.ensure(host);
+      const saved = await FaviconCache.ensure(host, pageUrl);
+      if (saved && img.isConnected) {
+        img.dataset.stage = 'cached';
+        img.src = saved;
+      } else if (img.isConnected && img.dataset.stage === '0') {
+        img.dataset.stage = '1';
+        img.src = img.dataset.origin + '/favicon.ico';
+      }
     }
   });
 }
 
-// 渲染后调用：favicon 两级降级（站点 /favicon.ico → Google 服务 → 首字母）
+// 浏览器图标失败时的降级链：/favicon.ico → Google 服务 → 首字母。
 function bindFaviconFallback(container) {
   container.querySelectorAll('.link-favicon').forEach(img => {
     img.addEventListener('error', () => {
       if (img.dataset.stage === '0') {
         img.dataset.stage = '1';
-        img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(img.dataset.host) + '&sz=64';
+        img.src = img.dataset.origin + '/favicon.ico';
       } else if (img.dataset.stage === '1') {
+        img.dataset.stage = '2';
+        img.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(img.dataset.host) + '&sz=32';
+      } else if (img.dataset.stage === '2') {
         const d = document.createElement('div');
         d.className = 'link-letter';
         d.textContent = img.dataset.letter || '?';
         img.replaceWith(d);
       }
     });
-    // Google 源加载成功时顺手建缓存
     img.addEventListener('load', () => {
-      if (img.dataset.stage === '1') FaviconCache.ensure(img.dataset.host);
+      if (img.dataset.stage === '1' || img.dataset.stage === '2') {
+        FaviconCache.fetchAndStore(img.dataset.host, img.src);
+      }
     });
   });
 }
@@ -243,6 +344,8 @@ const Calculator = {
       else if (btn.classList.contains('c-eq')) this.eq();
     });
     document.addEventListener('keydown', (e) => {
+      const target = e.target;
+      if (target && (target.matches('input, textarea, select') || target.isContentEditable)) return;
       const k = e.key;
       if (/^[0-9.]$/.test(k)) this.digit(k);
       else if (['+','-','*','/'].includes(k)) {
@@ -283,9 +386,9 @@ const Calculator = {
       case '-': r = a - b; break;
       case '\xD7': r = a * b; break;
       case '\xF7': r = b !== 0 ? a / b : 'Error'; break;
-      case '%': r = a % b; break;
+      case '%': r = b !== 0 ? a % b : 'Error'; break;
     }
-    this.d = r === 'Error' ? 'Error' : String(parseFloat(r.toFixed(10)));
+    this.d = r === 'Error' || !Number.isFinite(r) ? 'Error' : String(parseFloat(r.toFixed(10)));
     this.op2 = null; this.op = null; this.reset = true;
     this.disp();
   },
@@ -295,18 +398,49 @@ const Calculator = {
 const Converter = {
   units: {
     length: { m:'米', km:'千米', cm:'厘米', mm:'毫米', ft:'英尺', in:'英寸' },
-    weight: { kg:'千克', g:'克', lb:'磅', oz:'盎司', t:'吨' },
+    weight: {
+      kg:'千克', g:'克', mg:'毫克', t:'公吨',
+      jin:'市斤（中国）', liang:'两（中国）', qian:'钱（中国）',
+      lb:'磅（美/英）', oz:'盎司（美/英）', usTon:'短吨（美国）',
+      stone:'英石（英国）', ukTon:'长吨（英国）'
+    },
     temperature: { C:'摄氏度', F:'华氏度', K:'开尔文' },
-    area: { m2:'平方米', km2:'平方千米', ha:'公顷', mu:'亩', sqft:'平方英尺' },
-    volume: { L:'升', mL:'毫升', m3:'立方米', gal:'加仑', cup:'杯' },
+    area: {
+      m2:'平方米', km2:'平方千米', ha:'公顷',
+      mu:'亩（中国）', fen:'分（中国）', sqchi:'平方市尺（中国）',
+      sqin:'平方英寸（美/英）', sqft:'平方英尺（美/英）',
+      sqyd:'平方码（美/英）', acre:'英亩（美/英）', sqmi:'平方英里（美/英）'
+    },
+    volume: {
+      L:'升', mL:'毫升', cm3:'立方厘米', m3:'立方米',
+      usGal:'液量加仑（美国）', usQt:'液量夸脱（美国）',
+      usPt:'液量品脱（美国）', usCup:'杯（美国）', usFloz:'液量盎司（美国）',
+      ukGal:'加仑（英国）', ukQt:'夸脱（英国）',
+      ukPt:'品脱（英国）', ukFloz:'液量盎司（英国）'
+    },
     speed: { kmh:'km/h', ms:'m/s', mph:'mph', knot:'节' }
   },
   rates: {
     length: { m:1, km:1000, cm:0.01, mm:0.001, ft:0.3048, in:0.0254 },
-    weight: { kg:1, g:0.001, lb:0.453592, oz:0.0283495, t:1000 },
+    weight: {
+      kg:1, g:0.001, mg:0.000001, t:1000,
+      jin:0.5, liang:0.05, qian:0.005,
+      lb:0.45359237, oz:0.028349523125, usTon:907.18474,
+      stone:6.35029318, ukTon:1016.0469088
+    },
     temperature: { C:'C', F:'F', K:'K' },
-    area: { m2:1, km2:1000000, ha:10000, mu:666.667, sqft:0.092903 },
-    volume: { L:1, mL:0.001, m3:1000, gal:3.78541, cup:0.236588 },
+    area: {
+      m2:1, km2:1000000, ha:10000,
+      mu:2000/3, fen:200/3, sqchi:1/9,
+      sqin:0.00064516, sqft:0.09290304, sqyd:0.83612736,
+      acre:4046.8564224, sqmi:2589988.110336
+    },
+    volume: {
+      L:1, mL:0.001, cm3:0.001, m3:1000,
+      usGal:3.785411784, usQt:0.946352946, usPt:0.473176473,
+      usCup:0.2365882365, usFloz:0.0295735295625,
+      ukGal:4.54609, ukQt:1.1365225, ukPt:0.56826125, ukFloz:0.0284130625
+    },
     speed: { kmh:1, ms:3.6, mph:1.60934, knot:1.852 }
   },
   init() {
@@ -349,10 +483,19 @@ const Converter = {
       else if (t === 'F') r = c * 9/5 + 32;
       else r = c + 273.15;
     } else {
-      const base = val * (rate[fr] || 1);
-      r = base / (rate[t] || 1);
+      if (!Number.isFinite(rate[fr]) || !Number.isFinite(rate[t])) { this.out.value = ''; return; }
+      const base = val * rate[fr];
+      r = base / rate[t];
     }
-    this.out.value = parseFloat(r.toFixed(6)).toString();
+    this.out.value = this.format(r);
+  },
+  format(value) {
+    if (!Number.isFinite(value)) return '';
+    const abs = Math.abs(value);
+    if (abs !== 0 && (abs < 0.000001 || abs >= 1000000000000)) {
+      return Number(value.toPrecision(10)).toString();
+    }
+    return Number(value.toFixed(10)).toString();
   }
 };
 
@@ -363,6 +506,20 @@ const ExchangeRate = {
   // 切换币种/互换/刷新列表均不再触发网络请求，消除感知延迟。
   SOURCES: [
     {
+      name: 'Coinbase',
+      url: 'https://api.coinbase.com/v2/exchange-rates?currency=USD',
+      parse(d) {
+        if (!d || !d.data || d.data.currency !== 'USD' || !d.data.rates) return null;
+        const rates = { USD: 1 };
+        for (const code in d.data.rates) {
+          const value = Number(d.data.rates[code]);
+          if (Number.isFinite(value) && value > 0) rates[code.toUpperCase()] = value;
+        }
+        return { rates, date: '' };
+      }
+    },
+    {
+      name: 'Currency API',
       url: 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json',
       parse(d) {
         if (!d || !d.usd) return null;
@@ -372,6 +529,7 @@ const ExchangeRate = {
       }
     },
     {
+      name: 'ExchangeRate-API',
       url: 'https://open.er-api.com/v6/latest/USD',
       parse(d) {
         if (!d || d.result !== 'success') return null;
@@ -380,8 +538,11 @@ const ExchangeRate = {
     }
   ],
   CACHE_KEY: 'exRateCache',
-  CACHE_TTL: 30 * 60 * 1000, // 缓存 30 分钟内不重复请求
-  rates: null, dataDate: '', lastFetch: 0, fetching: false, timer: null,
+  AUTO_REFRESH_MS: 60 * 1000,
+  MIN_FETCH_INTERVAL: 15 * 1000,
+  REQUEST_TIMEOUT: 12 * 1000,
+  rates: null, dataDate: '', sourceName: '', lastFetch: 0, lastAttempt: 0,
+  fetching: false, timer: null,
 
   init() {
     this.from = document.getElementById('ex-from');
@@ -390,17 +551,23 @@ const ExchangeRate = {
     this.result = document.getElementById('ex-result');
     this.rateDisplay = document.getElementById('ex-rate-display');
     this.popularRates = document.getElementById('ex-popular-rates');
+    this.refreshBtn = document.getElementById('ex-refresh');
     this.populateCurrencies();
-    // 先用缓存秒开显示，再后台刷新
-    this.loadCache();
-    this.fetchRates();
+    // 先用缓存秒开显示，然后立即获取当前报价。
+    this.loadCache().finally(() => this.fetchRates(true));
     this.amount.addEventListener('input', () => this.convert());
     this.from.addEventListener('change', () => { this.convert(); this.showPopular(); });
     this.to.addEventListener('change', () => this.convert());
-    document.getElementById('ex-refresh').addEventListener('click', () => this.fetchRates(true));
+    this.refreshBtn.addEventListener('click', () => this.fetchRates(true));
     document.getElementById('ex-swap').addEventListener('click', () => this.swap());
     if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => this.fetchRates(), this.CACHE_TTL);
+    this.timer = setInterval(() => {
+      if (document.visibilityState === 'visible') this.fetchRates();
+    }, this.AUTO_REFRESH_MS);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.fetchRates();
+    });
+    window.addEventListener('online', () => this.fetchRates(true));
   },
 
   populateCurrencies() {
@@ -411,47 +578,84 @@ const ExchangeRate = {
     this.from.value = 'USD'; this.to.value = 'CNY';
   },
 
-  loadCache() {
-    chrome.storage.local.get([this.CACHE_KEY], (res) => {
-      const c = res[this.CACHE_KEY];
-      if (c && c.rates) {
-        this.rates = c.rates;
-        this.dataDate = c.date || '';
-        this.lastFetch = c.ts || 0;
-        this.convert();
-        this.showPopular();
-      }
-    });
+  async loadCache() {
+    const res = await chrome.storage.local.get([this.CACHE_KEY]);
+    const c = res[this.CACHE_KEY];
+    if (c && c.rates) {
+      this.rates = c.rates;
+      this.dataDate = c.date || '';
+      this.sourceName = c.source || '';
+      this.lastFetch = c.ts || 0;
+      this.convert();
+      this.showPopular();
+    }
   },
 
   saveCache() {
-    const c = { rates: this.rates, date: this.dataDate, ts: this.lastFetch };
-    chrome.storage.local.set({ [this.CACHE_KEY]: c });
+    const c = {
+      rates: this.rates,
+      date: this.dataDate,
+      source: this.sourceName,
+      ts: this.lastFetch
+    };
+    return chrome.storage.local.set({ [this.CACHE_KEY]: c });
   },
 
   async fetchRates(force) {
     if (this.fetching) return;
-    if (!force && this.rates && Date.now() - this.lastFetch < this.CACHE_TTL) return;
-    this.fetching = true;
-    if (!this.rates) this.rateDisplay.textContent = '加载中...';
-    for (const src of this.SOURCES) {
-      try {
-        const resp = await fetch(src.url);
-        const parsed = src.parse(await resp.json());
-        if (parsed && parsed.rates && parsed.rates.CNY) {
-          this.rates = parsed.rates;
-          this.dataDate = parsed.date;
-          this.lastFetch = Date.now();
-          this.saveCache();
-          this.convert();
-          this.showPopular();
-          this.fetching = false;
-          return;
-        }
-      } catch (e) { /* 尝试下一个数据源 */ }
+    const now = Date.now();
+    if (now - this.lastAttempt < this.MIN_FETCH_INTERVAL) return;
+    if (!force && document.visibilityState !== 'visible') return;
+    if (!navigator.onLine) {
+      if (!this.rates) this.rateDisplay.textContent = '当前离线，暂无可用汇率';
+      return;
     }
-    this.fetching = false;
-    if (!this.rates) this.rateDisplay.textContent = '获取汇率失败，请稍后重试';
+    this.lastAttempt = now;
+    this.fetching = true;
+    this.refreshBtn.disabled = true;
+    this.refreshBtn.classList.add('refreshing');
+    if (!this.rates) this.rateDisplay.textContent = '加载中...';
+    let updated = false;
+    try {
+      for (const src of this.SOURCES) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
+        try {
+          const resp = await fetch(src.url, { cache: 'no-store', signal: controller.signal });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const parsed = src.parse(await resp.json());
+          const hasAllCurrencies = parsed && parsed.rates &&
+            Object.keys(this.currencies).every(code => Number(parsed.rates[code]) > 0);
+          if (hasAllCurrencies) {
+            this.rates = parsed.rates;
+            this.dataDate = parsed.date || '';
+            this.sourceName = src.name;
+            this.lastFetch = Date.now();
+            await this.saveCache();
+            this.convert();
+            this.showPopular();
+            updated = true;
+            break;
+          }
+        } catch (e) {
+          // 当前数据源不可用时自动尝试下一个。
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+    } finally {
+      this.fetching = false;
+      this.refreshBtn.disabled = false;
+      this.refreshBtn.classList.remove('refreshing');
+    }
+    if (!updated) {
+      if (!this.rates) {
+        this.rateDisplay.textContent = '获取汇率失败，请稍后重试';
+      } else {
+        this.convert();
+        this.rateDisplay.title = '实时刷新失败，当前显示最近一次成功获取的缓存汇率';
+      }
+    }
   },
 
   // 交叉汇率：以 USD 为桥，f→t = rates[t] / rates[f]
@@ -468,12 +672,17 @@ const ExchangeRate = {
     if (isNaN(amount) || amount < 0) { this.result.value = ''; this.rateDisplay.textContent = '—'; return; }
     const f = this.from.value, t = this.to.value;
     const rate = this.crossRate(f, t);
-    if (rate == null) { this.result.value = 'N/A'; this.rateDisplay.textContent = '—'; return; }
+    if (rate == null) { this.result.value = ''; this.rateDisplay.textContent = '暂不支持该币种'; return; }
     this.result.value = (amount * rate).toFixed(4);
     const parts = [`1 ${f} = ${this.fmtRate(rate)} ${t}`];
-    if (this.dataDate) parts.push(`数据 ${this.dataDate}`);
+    if (this.sourceName) parts.push(this.sourceName);
+    if (this.lastFetch) {
+      parts.push(`更新 ${new Date(this.lastFetch).toLocaleTimeString('zh-CN', { hour12: false })}`);
+    } else if (this.dataDate) {
+      parts.push(`数据 ${this.dataDate}`);
+    }
     this.rateDisplay.textContent = parts.join(' · ');
-    this.rateDisplay.title = this.lastFetch ? `本地更新：${new Date(this.lastFetch).toLocaleString('zh-CN')}` : '';
+    this.rateDisplay.title = this.lastFetch ? `最近成功获取：${new Date(this.lastFetch).toLocaleString('zh-CN')}` : '';
   },
 
   fmtRate(r) {
@@ -521,7 +730,7 @@ const QuickLinks = {
   },
   render() {
     this.grid.innerHTML = this.links.map((l, i) => `
-      <div class="link-item" data-url="${l.url}">
+      <div class="link-item" data-url="${escHtml(l.url)}">
         <button class="del-btn" data-i="${i}">&times;</button>
         ${faviconHTML(l)}
         <span>${escHtml(l.name)}</span>
@@ -548,7 +757,8 @@ const QuickLinks = {
     const name = document.getElementById('link-name').value.trim();
     let url = document.getElementById('link-url').value.trim();
     if (!name || !url) return;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+    url = normalizeHttpUrl(url);
+    if (!url) return;
     this.links.push({ name, url });
     this.store(); this.render();
     document.getElementById('link-name').value = ''; document.getElementById('link-url').value = '';
@@ -642,7 +852,8 @@ const Browser = {
   isOpen() { return !this.view.classList.contains('hidden'); },
 
   open(url) {
-    if (url === this.currentUrl && this.isOpen()) return;
+    url = normalizeHttpUrl(url);
+    if (!url || (url === this.currentUrl && this.isOpen())) return;
     document.getElementById('content').classList.add('hidden');
     this.view.classList.remove('hidden');
     this.currentUrl = url;
